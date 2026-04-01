@@ -69,7 +69,7 @@ Wait approximately 60–90 seconds for first boot to complete.
 
 ### 2.2 Find the Pi on Your Network
 
-From your computer on the same WiFi network, try:
+**macOS / Linux** — open Terminal and connect:
 
 ```bash
 ssh efinder@efinder.local
@@ -80,6 +80,14 @@ If that does not resolve, find the IP address from your router's device list and
 ```bash
 ssh efinder@<ip-address>
 ```
+
+**Windows** — SSH is built into Windows 10 and 11. Open **PowerShell** or **Command Prompt** and run the same command:
+
+```powershell
+ssh efinder@efinder.local
+```
+
+If `efinder.local` does not resolve, find the IP from your router and use it directly. Alternatively install **PuTTY** (https://www.putty.org) for a graphical SSH client — enter hostname `efinder.local` or the IP address, port `22`, and connect.
 
 Log in with the password you set in the Imager.
 
@@ -217,37 +225,181 @@ No interaction with the Pi is needed during normal use.
 
 ---
 
+## Part 7 — Focusing
+
+The eFinder application must **not** be running while you focus, since it holds the camera exclusively. Stop it first:
+
+```bash
+sudo systemctl stop efinder
+```
+
+Restart it when done:
+
+```bash
+sudo systemctl start efinder
+```
+
+### Method 1 — Single Frame Capture (Recommended)
+
+Take a still image using the same exposure and gain settings the app uses, then pull it to your laptop to inspect:
+
+```bash
+libcamera-still \
+  --width 960 --height 760 \
+  --shutter 200000 \
+  --gain 20 \
+  --awbgains 1,1 \
+  --nopreview \
+  -o /tmp/focus_test.jpg
+```
+
+Then on your laptop:
+
+```bash
+# macOS
+scp efinder@192.168.50.1:/tmp/focus_test.jpg . && open focus_test.jpg
+
+# Linux
+scp efinder@192.168.50.1:/tmp/focus_test.jpg . && xdg-open focus_test.jpg
+```
+
+**Windows** — run in PowerShell:
+
+```powershell
+scp efinder@192.168.50.1:/tmp/focus_test.jpg .
+```
+
+Then open `focus_test.jpg` from File Explorer, or use a viewer like **IrfanView** that lets you zoom to 100% to judge star sharpness. If you have **WinSCP** installed you can browse and download files graphically instead.
+
+Adjust focus, repeat until stars are tight pinpoints. The `--shutter` value is in microseconds — `200000` equals 0.2 seconds, matching the default `Exposure:0.2` in `eFinder.config`. `--awbgains 1,1` disables auto white balance, matching the app's behaviour.
+
+To iterate quickly without retyping, use a one-liner loop on the Pi:
+
+```bash
+while true; do
+  libcamera-still --width 960 --height 760 \
+    --shutter 200000 --gain 20 --awbgains 1,1 \
+    --nopreview -o /tmp/focus_test.jpg && \
+  echo "Image captured — adjust focus and press Enter for next, Ctrl-C to stop"
+  read
+done
+```
+
+### Method 2 — Live MJPEG Stream to Laptop
+
+For a real-time view while adjusting focus, stream video from the Pi:
+
+```bash
+libcamera-vid \
+  --timeout 0 \
+  --width 960 --height 760 \
+  --shutter 200000 \
+  --gain 20 \
+  --codec mjpeg \
+  --listen \
+  -o tcp://0.0.0.0:8080
+```
+
+Then on your laptop open the stream in VLC (**Media → Open Network Stream**):
+
+```
+tcp/h264://192.168.50.1:8080
+```
+
+Or with ffplay (macOS/Linux):
+
+```bash
+ffplay tcp://192.168.50.1:8080
+```
+
+**Windows** — VLC for Windows works identically. Download from https://www.videolan.org if not already installed. ffplay is available as part of **ffmpeg for Windows** (https://ffmpeg.org/download.html) if you prefer the command line.
+
+Press Ctrl-C on the Pi to stop streaming when done.
+
+### Focus Targets
+
+**Best:** Stars at night. Point at a bright star (magnitude 1–3), use `--shutter 50000 --gain 10` as a starting point to avoid saturation, and adjust until the star disc is a tight point.
+
+**Good:** The Moon. Bright, high-contrast, genuinely at infinity. Adjust `--shutter` down to `1000`–`5000` to avoid overexposure.
+
+**Acceptable for bench setup:** An artificial star — a pinhole (0.1–0.5 mm) over a torch at 10 metres or more. Closer than 10 m will not be at true infinity focus for a 25 mm focal length lens.
+
+**Avoid:** Daytime terrestrial targets at less than ~500 m. They are close enough that infinity focus will be slightly off, and the eFinder operates exclusively on star fields.
+
+### Verifying Focus with the App
+
+Once focused, restart the app and check the solve quality in the log:
+
+```bash
+sudo systemctl start efinder
+journalctl -u efinder -f
+```
+
+A well-focused image on a clear night should show **30–80 centroids** and a **peak pixel value** in the range 150–230. Too few centroids means underexposed or out of focus. Peak value consistently above 240 means overexposed — reduce `Exposure` in `eFinder.config`.
+
+---
+
 ## Maintenance Access
 
 ### SSH over WiFi (primary)
 
-When connected to the eFinder WiFi network:
+When connected to the eFinder WiFi network, open Terminal (macOS/Linux) or PowerShell/Command Prompt (Windows):
 
 ```bash
 ssh efinder@192.168.50.1
 ```
 
+Windows users can also use **PuTTY** — enter IP `192.168.50.1`, port `22`.
+
 ### USB Serial Console (recovery / no WiFi)
 
-Connect a data-capable USB cable to the **USB** port (the inner port, not PWR).  
-On macOS/Linux the device appears as `/dev/cu.usbmodem*` or `/dev/ttyACM0`.  
-Use CoolTerm, screen, or minicom at **115200 8N1**:
+Connect a data-capable USB cable to the **USB** port (the inner port, not PWR).
+
+**macOS** — the device appears as `/dev/cu.usbmodem*`. Use **CoolTerm** or screen:
+
+```bash
+screen /dev/cu.usbmodem* 115200
+```
+
+**Linux** — the device appears as `/dev/ttyACM0`. Use screen or minicom:
 
 ```bash
 screen /dev/ttyACM0 115200
 ```
 
-This gives a login prompt directly — useful if the WiFi AP is not starting correctly.
+**Windows** — the device appears as a **COM port** (e.g. `COM3`) in Device Manager under *Ports (COM & LPT)*. Use **CoolTerm** (https://freeware.the-meiers.org) or **PuTTY** — select Serial, enter the COM port number, speed 115200.
+
+All platforms: connect at **115200 baud, 8N1**. This gives a login prompt directly — useful if the WiFi AP is not starting correctly.
 
 ### Samba File Share
 
-From a computer on the eFinder WiFi network, browse to:
+**macOS** — in Finder press **Cmd+K** and enter:
+
+```
+smb://192.168.50.1/efindershare
+```
+
+**Linux** — open a file manager and connect to:
+
+```
+smb://192.168.50.1/efindershare
+```
+
+Or mount from the terminal:
+
+```bash
+sudo mount -t cifs //192.168.50.1/efindershare /mnt/efinder -o username=efinder
+```
+
+**Windows** — open **File Explorer**, click in the address bar and enter:
 
 ```
 \\192.168.50.1\efindershare
 ```
 
-Username: `efinder`  Password: `efinder`
+Or map it as a network drive: right-click **This PC → Map network drive**, enter `\\192.168.50.1\efindershare`, and tick *Connect using different credentials*.
+
+All platforms: Username `efinder` / Password `efinder`.
 
 This gives read/write access to `/home/efinder` — useful for copying config files or captured images without SSH.
 
@@ -337,11 +489,27 @@ Any TCP client (e.g. `nc`, a Python script, or a custom app) connected to port 4
 | `:IM1#` | `:IM1#` | Start saving debug images to `Solver/images/` |
 | `:IM0#` | `:IM1#` | Stop saving debug images |
 
-Example using netcat:
+Example using netcat (macOS/Linux):
 
 ```bash
 echo -n ':GV#' | nc 192.168.50.1 4060
 ```
+
+**Windows** — use PowerShell's built-in TCP client:
+
+```powershell
+$tcp = New-Object System.Net.Sockets.TcpClient('192.168.50.1', 4060)
+$stream = $tcp.GetStream()
+$bytes = [System.Text.Encoding]::ASCII.GetBytes(':GV#')
+$stream.Write($bytes, 0, $bytes.Length)
+Start-Sleep -Milliseconds 200
+$buf = New-Object byte[] 1024
+$len = $stream.Read($buf, 0, 1024)
+[System.Text.Encoding]::ASCII.GetString($buf, 0, $len)
+$tcp.Close()
+```
+
+Or install **netcat for Windows** via winget: `winget install netcat` and use the same syntax as macOS/Linux.
 
 ---
 
