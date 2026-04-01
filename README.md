@@ -322,7 +322,7 @@ Press Ctrl-C on the Pi to stop streaming when done.
 
 **Good:** The Moon. Bright, high-contrast, genuinely at infinity. Adjust `--shutter` down to `1000`–`5000` to avoid overexposure.
 
-**Acceptable for bench setup:** An artificial star — a pinhole (0.1–0.5 mm) over a torch at 10 metres or more. Closer than 10 m will not be at true infinity focus for a 25 mm focal length lens.
+**Acceptable for bench setup:** An artificial star — a pinhole (0.1–0.5 mm) over a light source at 10 metres or more. Closer than 10 m will not be at true infinity focus for a 25 mm focal length lens.
 
 **Avoid:** Daytime terrestrial targets at less than ~500 m. They are close enough that infinity focus will be slightly off, and the eFinder operates exclusively on star fields.
 
