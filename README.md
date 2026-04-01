@@ -1,45 +1,372 @@
-# eFinder cli tinySS
+# eFinder — tinySS
 
-![IMG_7238](https://github.com/user-attachments/assets/6b5f1d37-ee78-47f8-93d4-b56a7282c85d)
+Plate-solving electronic finder scope for the Raspberry Pi Zero 2W.  
+Connects to **SkySafari** over WiFi using the LX200 protocol on TCP port 4060.  
+Uses an **IMX477 camera** (Raspberry Pi HQ Camera or Arducam IMX477) and the **Tetra3** star-pattern matching library for fast, reliable plate solving.
 
-## Basics
+---
 
-eFinder cli is a digital finder for astronomical telescopes, utilising plate-solving to improve pointing accuracy.
+## Hardware Required
 
-*** THIS IS MEANT TO BE A TINY VERSION THAT IS USED WITH SKYSAFARI ONLY
-*** IT HAS BEEN REFACTORED BY CLAUDE.AI
--mconsidine
+- Raspberry Pi Zero 2W
+- Raspberry Pi HQ Camera or Arducam IMX477 board
+- MicroSD card (16 GB or larger, Class 10 / A1 recommended)
+- Micro-USB cable (data-capable, not charge-only) — for the USB data port
+- Power supply via the PWR micro-USB port
+- Optional: ADXL343 accelerometer on I2C for altitude readout
 
-Requires:
+---
 
-- microSd card loaded with Raspberry Pi 64bit Bookworm OS Lite (No desktop)
-- Raspberry Pi Zero 2W.
+## Part 1 — Burn the SD Card
 
+### 1.1 Download Raspberry Pi Imager
 
-- A custom box. 3d print files available
-- A Camera, the RPi HQ Camera module is recommended, although the Arducam equivalent can work.
-- Camera lens, 25mm f1.2 cctv lens
-- A host computer
+Download and install **Raspberry Pi Imager** from:  
+https://www.raspberrypi.com/software/
 
-Original details at [
-](https://astrokeith.com/equipment/efinder)https://astrokeith.com/equipment/efinder
+### 1.2 Choose OS
 
-THIS NEEDS TO BE ADDED TO A WORKING RPI ZERO 2W "Bookworm" OS
-## Compatibility
+- Click **Choose OS**
+- Select **Raspberry Pi OS (other)**
+- Select **Raspberry Pi OS Lite (64-bit)**  
+  *(Bookworm. Do not use the Desktop version — it is not needed and wastes space.)*
 
-The eFinder cli is designed to operate alongside a host computer
+### 1.3 Choose Storage
 
+Insert your MicroSD card and select it.
 
-## Operation
+### 1.4 Configure OS Settings
 
-ssh & Samba file sharing is enabled at efinder.local, or whatever hostname you have chosen.
+Click the **gear icon** (or press Ctrl+Shift+X) to open the advanced settings panel.  
+Fill in the following — these must be set before burning:
 
-A forum for builders and users can be found at https://groups.io/g/eFinder
-BUT THEY WILL KNOW NOTHING ABOUT THIS IMPLEMENTATION
+| Setting | Value |
+|---------|-------|
+| Hostname | `efinder` |
+| Username | `efinder` |
+| Password | *(choose a strong password — you will use this to SSH in)* |
+| WiFi SSID | *(your home WiFi network name)* |
+| WiFi Password | *(your home WiFi password)* |
+| WiFi country | *(your country code, e.g. US)* |
+| Enable SSH | ✓ (use password authentication) |
+| Locale / timezone | *(set to your timezone)* |
 
-## Acknowledgements and Licences
+> **Why home WiFi?** The Pi needs internet access during installation to download packages. After installation it will switch to AP (hotspot) mode automatically. Your home WiFi credentials are only used once.
 
-The eFinder Cli uses Tetra3.
-AstroKeith is the original author and without whom this would not have been possible.
-Claude.ai was used in the refactoring
+### 1.5 Write the Image
 
+Click **Write** and wait for the process to complete. Eject the card safely when done.
+
+---
+
+## Part 2 — First Boot
+
+### 2.1 Insert the Card and Power On
+
+Insert the MicroSD card into the Pi Zero 2W.  
+Connect power to the **PWR** micro-USB port (the outer port, labelled PWR IN).  
+Wait approximately 60–90 seconds for first boot to complete.
+
+### 2.2 Find the Pi on Your Network
+
+From your computer on the same WiFi network, try:
+
+```bash
+ssh efinder@efinder.local
+```
+
+If that does not resolve, find the IP address from your router's device list and connect directly:
+
+```bash
+ssh efinder@<ip-address>
+```
+
+Log in with the password you set in the Imager.
+
+---
+
+## Part 3 — Install eFinder
+
+All commands below are run on the Pi over SSH.
+
+### 3.1 Clone the Repository
+
+```bash
+git clone --branch tinySS https://github.com/mconsidine/eFinder_cli.git
+cd eFinder_cli
+```
+
+### 3.2 Run the Installer
+
+```bash
+sudo bash install.sh
+```
+
+The installer will work through the following steps automatically:
+
+| Step | What happens |
+|------|-------------|
+| 1 | System packages updated |
+| 2 | Required packages installed (picamera2, PIL, scipy, Samba, Apache, PHP) |
+| 3 | Python virtual environment created at `~/venv-efinder` |
+| 4 | This repository cloned to `~/eFinder_cli` |
+| 5 | Working directories created, support files deployed |
+| 6 | Tetra3 plate-solving library installed and star databases downloaded |
+| 7 | Samba file share configured |
+| 8 | Apache/PHP web server configured for OTA updates |
+| 9 | `/boot/firmware/config.txt` updated for IMX477 camera and USB serial gadget |
+| 10–12 | SSH, I2C, USB serial console enabled |
+| 13 | `eFinder.py` deployed |
+| 14–16 | systemd services installed for auto-start on boot |
+
+> **Duration:** The Tetra3 database download is the longest step — allow 10–20 minutes depending on your connection speed. Do not interrupt the installer once it has started.
+
+### 3.3 Reboot
+
+When the installer finishes it will print a summary and ask:
+
+```
+Reboot now? [y/N]
+```
+
+Type `y` and press Enter. The Pi will reboot.
+
+---
+
+## Part 4 — After Reboot
+
+After rebooting the Pi will **no longer connect to your home WiFi**. It now runs as a WiFi access point.
+
+### 4.1 Connect to the eFinder WiFi Network
+
+On your phone, tablet, or laptop:
+
+- Open WiFi settings
+- Connect to the network named **`efinder`** followed by 4 hex characters, e.g. `efinder3a2f`
+- Password: **`12345678`**
+
+The SSID and password are also saved on the Pi at:  
+`/home/efinder/Solver/default_hotspot.txt`
+
+### 4.2 Verify the eFinder is Running
+
+From a device connected to the eFinder WiFi, open a terminal and SSH in:
+
+```bash
+ssh efinder@192.168.50.1
+```
+
+Check the service status:
+
+```bash
+sudo systemctl status efinder
+```
+
+You should see `active (running)`. To watch the live log:
+
+```bash
+journalctl -u efinder -f
+```
+
+A healthy startup looks like:
+
+```
+eFinder version 6.6
+Coordinates ready
+No accelerometer fitted
+Loading Tetra3 database…
+Tetra3 ready
+Offset: (380.0, 480.0)
+Starting solve loop…
+Starting WiFi/LX200 server…
+eFinder running — waiting for SkySafari connection on port 4060
+```
+
+---
+
+## Part 5 — Connect SkySafari
+
+### 5.1 Configure SkySafari
+
+In SkySafari, go to **Settings → Telescope → Setup**:
+
+| Setting | Value |
+|---------|-------|
+| Scope Type | Meade LX-200 GPS |
+| Mount Type | Alt-Az (or match your mount) |
+| IP Address | `192.168.50.1` |
+| Port | `4060` |
+
+### 5.2 Connect
+
+Tap **Connect** in SkySafari. The eFinder log will show:
+
+```
+SkySafari connected from ('192.168.50.1', <port>)
+```
+
+SkySafari will send its date and time to the Pi on connection. The Pi sets its system clock from this — no internet or NTP is required in the field.
+
+---
+
+## Part 6 — Normal Use
+
+Power on the Pi. Wait 30–60 seconds. Connect your phone to the eFinder WiFi. Connect SkySafari. The eFinder plate-solves continuously and reports the current position to SkySafari automatically.
+
+No interaction with the Pi is needed during normal use.
+
+---
+
+## Maintenance Access
+
+### SSH over WiFi (primary)
+
+When connected to the eFinder WiFi network:
+
+```bash
+ssh efinder@192.168.50.1
+```
+
+### USB Serial Console (recovery / no WiFi)
+
+Connect a data-capable USB cable to the **USB** port (the inner port, not PWR).  
+On macOS/Linux the device appears as `/dev/cu.usbmodem*` or `/dev/ttyACM0`.  
+Use CoolTerm, screen, or minicom at **115200 8N1**:
+
+```bash
+screen /dev/ttyACM0 115200
+```
+
+This gives a login prompt directly — useful if the WiFi AP is not starting correctly.
+
+### Samba File Share
+
+From a computer on the eFinder WiFi network, browse to:
+
+```
+\\192.168.50.1\efindershare
+```
+
+Username: `efinder`  Password: `efinder`
+
+This gives read/write access to `/home/efinder` — useful for copying config files or captured images without SSH.
+
+---
+
+## OTA Updates
+
+To update files on the Pi without SSH:
+
+1. Create a zip archive of the files to update, preserving their full paths from `/`  
+   e.g. `home/efinder/Solver/eFinder.py` inside the zip
+2. Name the file `efinderUpdate.zip`
+3. Copy it to `\\192.168.50.1\efindershare\uploads\` via Samba
+4. Reboot the Pi
+
+On next boot the update service runs before the main app, extracts the zip to `/`, and reboots again automatically. If the zip is malformed it is deleted and the Pi continues normally.
+
+---
+
+## Troubleshooting
+
+**eFinder service fails to start**
+
+```bash
+journalctl -u efinder -b --no-pager
+```
+
+Common causes:
+- Camera not detected — check `libcamera-hello --list-cameras`; verify the ribbon cable is seated; confirm `dtoverlay=imx477` is in `/boot/firmware/config.txt`
+- Tetra3 database missing — check `~/venv-efinder/lib/python*/site-packages/tetra3/data/` contains `.npz` files
+
+**SkySafari cannot connect**
+
+- Confirm your device is on the eFinder WiFi, not your home network
+- Confirm port is set to `4060` not `4061`
+- Check `sudo systemctl status efinder` — the service must be running before SkySafari connects
+
+**WiFi AP not appearing after reboot**
+
+```bash
+nmcli connection show
+nmcli connection up efinder-ap
+```
+
+**Restore home WiFi temporarily** (to re-run installer or download updates):
+
+```bash
+sudo nmcli connection modify preconfigured autoconnect yes
+sudo nmcli connection up preconfigured
+```
+
+To return to AP-only mode afterward:
+
+```bash
+sudo nmcli connection modify preconfigured autoconnect no
+sudo reboot
+```
+
+**Check camera overlay**
+
+```bash
+vcgencmd get_config dtoverlay
+libcamera-hello --list-cameras
+```
+
+---
+
+## Diagnostic Commands over TCP
+
+Any TCP client (e.g. `nc`, a Python script, or a custom app) connected to port 4060 can send these diagnostic commands while SkySafari is not connected:
+
+| Command | Response | Description |
+|---------|----------|-------------|
+| `:PS#` | `:PS1#` or `:PS0#` | Trigger a plate solve |
+| `:GV#` | `:GV6.6#` | Get software version |
+| `:GS#` | `:GS  42#` | Get star count from last solve |
+| `:GK#` | `:GK 187#` | Get peak pixel value from last solve |
+| `:Gt#` | `:Gt02.34#` | Get elapsed solve time (seconds) |
+| `:GO#` | `:GO0.012,0.003#` | Get current pointing offset |
+| `:SO#` | `:SO1#` | Reset offset to image centre |
+| `:OF#` | `:OFAlbireo,HIP98110,...#` | Measure offset, return alignment star |
+| `:GX#` | `:GX0.2#` | Auto-expose, return chosen exposure |
+| `:SX0.3#` | `:SX1#` | Set exposure to 0.3 seconds |
+| `:GA#` | `:GA45#` | Get scope altitude (requires accelerometer) |
+| `:TS#` | `:TS1#` | Enable test mode (uses test.npy instead of camera) |
+| `:TO#` | `:TO1#` | Disable test mode |
+| `:IM1#` | `:IM1#` | Start saving debug images to `Solver/images/` |
+| `:IM0#` | `:IM1#` | Stop saving debug images |
+
+Example using netcat:
+
+```bash
+echo -n ':GV#' | nc 192.168.50.1 4060
+```
+
+---
+
+## File Layout on the Pi
+
+```
+/home/efinder/
+├── venv-efinder/          Python virtual environment
+├── tetra3/                Tetra3 source
+├── eFinder_cli/           Repository clone (tinySS branch)
+├── uploads/               OTA update zip drop location
+└── Solver/
+    ├── eFinder.py         Main application
+    ├── eFinder.config     Saved exposure, gain, and offset settings
+    ├── starnames.csv      HIP star name lookup for offset measurement
+    ├── text.ttf           Font for debug image annotation
+    ├── test.npy           Test image for test mode (northern hemisphere)
+    ├── images/            Debug capture output (tmpfs — cleared on reboot)
+    ├── default_hotspot.txt  AP SSID and password
+    └── www/               Web UI files for OTA updater
+```
+
+---
+
+## License
+
+Derived from original eFinder work Copyright (C) 2025 Keith Venables, licensed under the GNU General Public License v3.  
+See https://github.com/AstroKeith/eFinder_cli for the original project.
