@@ -1,55 +1,6 @@
 name: Build eFinder RPi Image
 
 on:
-  #push:
-  #  branches: [main]
-  workflow_dispatch:
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-
-      # Inject secrets into a config file that pi-gen will bake into the image
-      - name: Write config.env
-        run: |
-          cat > stage-custom/files/config.env <<EOF
-          WIFI_PASS="12345678"
-          SAMBA_PASS="12345678"
-          EOF
-
-      # Also copy the app files so 01-run.sh can place them in the image
-      - name: Stage app files
-        run: |
-          cp install.sh stage-custom/files/install.sh
-          cp Solver/eFinder.py  stage-custom/files/eFinder.py
-
-      - name: Set executable permissions
-        run: |
-          chmod +x stage-custom/01-run.sh
-          chmod +x stage-custom/files/firstrun.sh
-          chmod +x stage-custom/files/install.sh
-
-      - name: Build Raspberry Pi OS image
-        uses: usimd/pi-gen-action@v1
-        id: build
-        with:
-          
-          image-name: "efinder"
-          release: bookworm
-          stage-list: "stage0 stage1 stage2 ./stage-custom"
-          compression: "xz"
-          enable-ssh: 1
-          username: "efinder"
-          password: "raspberry"
-          hostname: "efinder"
-
-
-name: Build eFinder RPi Image
-
-on:
   workflow_dispatch:
 
 jobs:
