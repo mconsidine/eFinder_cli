@@ -16,9 +16,9 @@ jobs:
       - name: Write config.env
         run: |
           cat > stage-custom/files/config.env <<EOF
-          WIFI_SSID=${{ secrets.EFINDER_WIFI_SSID }}
-          WIFI_PASS=${{ secrets.EFINDER_WIFI_PASS }}
-          SAMBA_PASS=${{ secrets.EFINDER_SAMBA_PASS }}
+          WIFI_SSID=${{ eFinder }}
+          WIFI_PASS=${{ 12345678 }}
+          SAMBA_PASS=${{ 12345678 }}
           EOF
 
       # Also copy the app files so 01-run.sh can place them in the image
@@ -37,7 +37,7 @@ jobs:
           compression: "xz"
           enable-ssh: 1
           username: "efinder"
-          password: ${{ secrets.EFINDER_PI_PASSWORD }}
+          password: ${{ raspberry }}
           hostname: "efinder"
           locale: "en_US.UTF-8"
           keyboard-keymap: "us"
