@@ -102,7 +102,7 @@ jobs:
 
           # Resize root partition and filesystem to fill new space
           sudo parted -s $LOOP resizepart 2 100%
-          sudo e2fsck -f ${LOOP}p2
+          sudo e2fsck -fy ${LOOP}p2 || true
           sudo resize2fs ${LOOP}p2
 
           # Mount root and boot partitions
