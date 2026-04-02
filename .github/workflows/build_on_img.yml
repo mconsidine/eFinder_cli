@@ -1,4 +1,4 @@
-name: Build eFinder RPi Image
+name: Build eFinder RPi Image v2
 
 on:
   workflow_dispatch:
