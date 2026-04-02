@@ -31,11 +31,12 @@ jobs:
           chmod +x stage-custom/01-run.sh
           chmod +x stage-custom/files/firstrun.sh
           chmod +x stage-custom/files/install.sh
-          
+
       - name: Build Raspberry Pi OS image
         uses: usimd/pi-gen-action@v1
         id: build
         with:
+          pi-gen-version: "2025-11-24-raspios-bookworm-arm64"
           image-name: "efinder"
           release: bookworm
           stage-list: "stage0 stage1 stage2 ./stage-custom"
