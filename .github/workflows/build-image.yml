@@ -36,7 +36,7 @@ jobs:
         uses: usimd/pi-gen-action@v1
         id: build
         with:
-          pi-gen-version: "2025-11-24-raspios-bookworm-arm64"
+          
           image-name: "efinder"
           release: bookworm
           stage-list: "stage0 stage1 stage2 ./stage-custom"
@@ -45,15 +45,168 @@ jobs:
           username: "efinder"
           password: "raspberry"
           hostname: "efinder"
+
+
+name: Build eFinder RPi Image
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Free up runner disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android \
+                      /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h
+
+      - name: Build stage-custom directory structure
+        run: |
+          # Create the full pi-gen stage structure from scratch
+          mkdir -p stage-custom/00-install/files/Solver
+
+          # Pi-gen stage control files
+          touch stage-custom/EXPORT_IMAGE
+          touch stage-custom/SKIP_IMAGES
+
+          # Copy app files from repo into the stage
+          cp install.sh stage-custom/00-install/files/install.sh
+          cp Solver/eFinder.py stage-custom/00-install/files/Solver/eFinder.py
+          cp Solver/NexusUsb_2.py stage-custom/00-install/files/Solver/NexusUsb_2.py
+          cp Solver/RPICamera_Nexus_4.py stage-custom/00-install/files/Solver/RPICamera_Nexus_4.py
+          cp Solver/platesolve.py stage-custom/00-install/files/Solver/platesolve.py
+          cp Solver/config.py stage-custom/00-install/files/Solver/config.py
+
+      - name: Write config.env from secrets
+        run: |
+          cat > stage-custom/00-install/files/config.env <<EOF
+          WIFI_PASS="12345678"
+          SAMBA_PASS="12345678"
+          EOF
+
+      - name: Write firstrun.sh
+        run: |
+          cat > stage-custom/00-install/files/firstrun.sh <<'EOF'
+          #!/bin/bash
+          set -e
+          LOG=/home/efinder/firstrun.log
+          exec > >(tee -a "$LOG") 2>&1
+
+          echo "=== eFinder first-boot setup: $(date) ==="
+
+          source /home/efinder/config.env
+          export WIFI_PASS SAMBA_PASS
+
+          cd /home/efinder
+          bash /home/efinder/install.sh --non-interactive
+
+          systemctl disable firstrun.service
+          rm -f /etc/systemd/system/firstrun.service
+
+          echo "=== First-boot setup complete: $(date) ==="
+          reboot
+          EOF
+          chmod +x stage-custom/00-install/files/firstrun.sh
+
+      - name: Write firstrun.service
+        run: |
+          cat > stage-custom/00-install/files/firstrun.service <<'EOF'
+          [Unit]
+          Description=eFinder first-boot setup
+          After=network-online.target
+          Wants=network-online.target
+          ConditionPathExists=/home/efinder/install.sh
+
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/local/bin/firstrun.sh
+          RemainAfterExit=yes
+          StandardOutput=journal+console
+          StandardError=journal+console
+          TimeoutStartSec=1800
+
+          [Install]
+          WantedBy=multi-user.target
+          EOF
+
+      - name: Write 01-run.sh
+        run: |
+          cat > stage-custom/00-install/01-run.sh <<'EOF'
+          #!/bin/bash -e
+
+          echo "=== eFinder stage-custom: starting ==="
+
+          # Create efinder user home structure
+          install -d -m 755 /home/efinder
+          install -d -m 755 /home/efinder/Solver
+
+          # Copy app files into image
+          install -m 755 files/install.sh        /home/efinder/install.sh
+          install -m 755 files/Solver/eFinder.py /home/efinder/Solver/eFinder.py
+          install -m 755 files/Solver/NexusUsb_2.py /home/efinder/Solver/NexusUsb_2.py
+          install -m 755 files/Solver/RPICamera_Nexus_4.py /home/efinder/Solver/RPICamera_Nexus_4.py
+          install -m 755 files/Solver/platesolve.py /home/efinder/Solver/platesolve.py
+          install -m 755 files/Solver/config.py /home/efinder/Solver/config.py
+          install -m 600 files/config.env        /home/efinder/config.env
+
+          # Install firstrun script and service
+          install -m 755 files/firstrun.sh      /usr/local/bin/firstrun.sh
+          install -m 644 files/firstrun.service /etc/systemd/system/firstrun.service
+
+          # Enable firstrun service
+          systemctl enable firstrun.service
+
+          # Fix ownership
+          chown -R efinder:efinder /home/efinder
+
+          echo "=== eFinder stage-custom: complete ==="
+          EOF
+          chmod +x stage-custom/00-install/01-run.sh
+
+      - name: Write 00-packages
+        run: |
+          cat > stage-custom/00-install/00-packages <<'EOF'
+          git
+          EOF
+
+      - name: Build Raspberry Pi OS image
+        uses: usimd/pi-gen-action@v1
+        id: build
+        with:
+          pi-gen-version: "2025-11-24-raspios-bookworm-arm64"
+          extra-host-dependencies: git
+          image-name: "efinder"
+          release: bookworm
+          stage-list: "stage0 stage1 stage2 ./stage-custom"
+          compression: "xz"
+          enable-ssh: 1
+          username: "efinder"
+          password: "12345678"
+          hostname: "efinder"
           locale: "en_US.UTF-8"
           keyboard-keymap: "us"
           keyboard-layout: "English (US)"
           timezone: "America/New_York"
           wpa-country: "US"
 
-      - name: Upload image
+      - name: Upload image artifact
         uses: actions/upload-artifact@v4
         with:
           name: efinder-image-${{ github.sha }}
           path: ${{ steps.build.outputs.image-path }}
           retention-days: 14
+
+      - name: Upload build logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: /tmp/pi-gen-action*/work/*/build.log
+          retention-days: 3
+
