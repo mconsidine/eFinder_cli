@@ -1,8 +1,8 @@
 name: Build eFinder RPi Image
 
 on:
-  push:
-    branches: [main]
+  #push:
+  #  branches: [main]
   workflow_dispatch:
 
 jobs:
@@ -37,7 +37,7 @@ jobs:
           compression: "xz"
           enable-ssh: 1
           username: "efinder"
-          password: ${{ raspberry }}
+          password: "raspberry"
           hostname: "efinder"
           locale: "en_US.UTF-8"
           keyboard-keymap: "us"
