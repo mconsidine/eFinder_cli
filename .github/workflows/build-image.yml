@@ -16,9 +16,9 @@ jobs:
       - name: Write config.env
         run: |
           cat > stage-custom/files/config.env <<EOF
-          WIFI_SSID=${{ eFinder }}
-          WIFI_PASS=${{ 12345678 }}
-          SAMBA_PASS=${{ 12345678 }}
+          WIFI_SSID="eFinder"
+          WIFI_PASS="12345678"
+          SAMBA_PASS="12345678"
           EOF
 
       # Also copy the app files so 01-run.sh can place them in the image
