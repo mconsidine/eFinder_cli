@@ -29,10 +29,10 @@ jobs:
           # Copy app files from repo into the stage
           cp install.sh stage-custom/00-install/files/install.sh
           cp Solver/eFinder.py stage-custom/00-install/files/Solver/eFinder.py
-          cp Solver/NexusUsb_2.py stage-custom/00-install/files/Solver/NexusUsb_2.py
-          cp Solver/RPICamera_Nexus_4.py stage-custom/00-install/files/Solver/RPICamera_Nexus_4.py
-          cp Solver/platesolve.py stage-custom/00-install/files/Solver/platesolve.py
-          cp Solver/config.py stage-custom/00-install/files/Solver/config.py
+          cp Solver/eFinder.config stage-custom/00-install/files/Solver/eFinder.config
+          cp Solver/starnames.csv stage-custom/00-install/files/Solver/starnames.csv
+          cp Solver/test.npy stage-custom/00-install/files/Solver/test.npy
+          cp Solver/text.ttf stage-custom/00-install/files/Solver/text.ttf
 
       - name: Write config.env from secrets
         run: |
@@ -100,10 +100,10 @@ jobs:
           # Copy app files into image
           install -m 755 files/install.sh        /home/efinder/install.sh
           install -m 755 files/Solver/eFinder.py /home/efinder/Solver/eFinder.py
-          install -m 755 files/Solver/NexusUsb_2.py /home/efinder/Solver/NexusUsb_2.py
-          install -m 755 files/Solver/RPICamera_Nexus_4.py /home/efinder/Solver/RPICamera_Nexus_4.py
-          install -m 755 files/Solver/platesolve.py /home/efinder/Solver/platesolve.py
-          install -m 755 files/Solver/config.py /home/efinder/Solver/config.py
+          install -m 755 files/Solver/eFinder.config /home/efinder/Solver/eFinder.config
+          install -m 755 files/Solver/starnames.csv /home/efinder/Solver/starnames.csv
+          install -m 755 files/Solver/test.npy /home/efinder/Solver/test.npy
+          install -m 755 files/Solver/text.ttf /home/efinder/Solver/text.ttf
           install -m 600 files/config.env        /home/efinder/config.env
 
           # Install firstrun script and service
