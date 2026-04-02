@@ -1,0 +1,53 @@
+name: Build eFinder RPi Image
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      # Inject secrets into a config file that pi-gen will bake into the image
+      - name: Write config.env
+        run: |
+          cat > stage-custom/files/config.env <<EOF
+          WIFI_SSID=${{ secrets.EFINDER_WIFI_SSID }}
+          WIFI_PASS=${{ secrets.EFINDER_WIFI_PASS }}
+          SAMBA_PASS=${{ secrets.EFINDER_SAMBA_PASS }}
+          EOF
+
+      # Also copy the app files so 01-run.sh can place them in the image
+      - name: Stage app files
+        run: |
+          cp install.sh stage-custom/files/install.sh
+          cp eFinder.py  stage-custom/files/eFinder.py
+
+      - name: Build Raspberry Pi OS image
+        uses: usimd/pi-gen-action@v1
+        id: build
+        with:
+          image-name: "efinder"
+          release: bookworm
+          stage-list: "stage0 stage1 stage2 ./stage-custom"
+          compression: "xz"
+          enable-ssh: 1
+          username: "efinder"
+          password: ${{ secrets.EFINDER_PI_PASSWORD }}
+          hostname: "efinder"
+          locale: "en_US.UTF-8"
+          keyboard-keymap: "us"
+          keyboard-layout: "English (US)"
+          timezone: "America/New_York"
+          wpa-country: "US"
+
+      - name: Upload image
+        uses: actions/upload-artifact@v4
+        with:
+          name: efinder-image-${{ github.sha }}
+          path: ${{ steps.build.outputs.image-path }}
+          retention-days: 14
