@@ -25,7 +25,8 @@ jobs:
           # Pi-gen stage control files
           touch stage-custom/EXPORT_IMAGE
           touch stage-custom/SKIP_IMAGES
-
+          echo "stage2" > stage-custom/STAGE_PREREQS
+          
           # Copy app files from repo into the stage
           cp install.sh stage-custom/00-install/files/install.sh
           cp Solver/eFinder.py stage-custom/00-install/files/Solver/eFinder.py
@@ -33,7 +34,7 @@ jobs:
           cp Solver/starnames.csv stage-custom/00-install/files/Solver/starnames.csv
           cp Solver/test.npy stage-custom/00-install/files/Solver/test.npy
           cp Solver/text.ttf stage-custom/00-install/files/Solver/text.ttf
-
+          
       - name: Write config.env from secrets
         run: |
           cat > stage-custom/00-install/files/config.env <<EOF
@@ -85,7 +86,17 @@ jobs:
           [Install]
           WantedBy=multi-user.target
           EOF
-
+          
+      - name: Write prerun.sh
+        run: |
+          cat > stage-custom/00-install/prerun.sh <<'EOF'
+          #!/bin/bash -e
+          if [ ! -d "${ROOTFS_DIR}" ]; then
+            copy_previous
+          fi
+          EOF
+          chmod +x stage-custom/00-install/prerun.sh
+          
       - name: Write 01-run.sh
         run: |
           cat > stage-custom/00-install/01-run.sh <<'EOF'
