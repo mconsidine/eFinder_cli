@@ -23,16 +23,15 @@ jobs:
       # Also copy the app files so 01-run.sh can place them in the image
       - name: Stage app files
         run: |
-          echo "first ls"
-          ls -lha
-          mkdir -p stage-custom/files
           cp install.sh stage-custom/files/install.sh
           cp Solver/eFinder.py  stage-custom/files/eFinder.py
-          echo "second ls"
-          ls -lha
-          ls -lha stage-custom
-          ls -lha stage-custom/files
 
+      - name: Set executable permissions
+        run: |
+          chmod +x stage-custom/01-run.sh
+          chmod +x stage-custom/files/firstrun.sh
+          chmod +x stage-custom/files/install.sh
+          
       - name: Build Raspberry Pi OS image
         uses: usimd/pi-gen-action@v1
         id: build
