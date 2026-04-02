@@ -100,10 +100,10 @@ jobs:
           # Copy app files into image
           install -m 755 files/install.sh        /home/efinder/install.sh
           install -m 755 files/Solver/eFinder.py /home/efinder/Solver/eFinder.py
-          install -m 755 files/Solver/eFinder.config /home/efinder/Solver/eFinder.config
-          install -m 755 files/Solver/starnames.csv /home/efinder/Solver/starnames.csv
-          install -m 755 files/Solver/test.npy /home/efinder/Solver/test.npy
-          install -m 755 files/Solver/text.ttf /home/efinder/Solver/text.ttf
+          install -m 644 files/Solver/eFinder.config /home/efinder/Solver/eFinder.config
+          install -m 644 files/Solver/starnames.csv /home/efinder/Solver/starnames.csv
+          install -m 644 files/Solver/test.npy /home/efinder/Solver/test.npy
+          install -m 644 files/Solver/text.ttf /home/efinder/Solver/text.ttf
           install -m 600 files/config.env        /home/efinder/config.env
 
           # Install firstrun script and service
