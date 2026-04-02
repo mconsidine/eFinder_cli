@@ -17,63 +17,53 @@ jobs:
                       /opt/ghc /opt/hostedtoolcache/CodeQL
           df -h
 
-      - name: Build stage-custom directory structure
+      - name: Build stage-custom structure and write all files
         run: |
-          # Create the full pi-gen stage structure from scratch
+
+          # ---------------------------------------------------------------
+          # Directory structure
+          # ---------------------------------------------------------------
           mkdir -p stage-custom/00-install/files/Solver
 
-          # Pi-gen stage control files
+          # ---------------------------------------------------------------
+          # Stage root control files
+          # ---------------------------------------------------------------
           touch stage-custom/EXPORT_IMAGE
           touch stage-custom/SKIP_IMAGES
           echo "stage2" > stage-custom/STAGE_PREREQS
-          
-          # Copy app files from repo into the stage
-          cp install.sh stage-custom/00-install/files/install.sh
-          cp Solver/eFinder.py stage-custom/00-install/files/Solver/eFinder.py
-          cp Solver/eFinder.config stage-custom/00-install/files/Solver/eFinder.config
-          cp Solver/starnames.csv stage-custom/00-install/files/Solver/starnames.csv
-          cp Solver/test.npy stage-custom/00-install/files/Solver/test.npy
-          cp Solver/text.ttf stage-custom/00-install/files/Solver/text.ttf
-          
-      - name: Write config.env from secrets
-        run: |
-          cat > stage-custom/00-install/files/config.env <<EOF
-          WIFI_PASS="12345678"
-          SAMBA_PASS="12345678"
-          EOF
 
-      - name: Write firstrun.sh
-        run: |
-          cat > stage-custom/00-install/files/firstrun.sh <<'EOF'
-          #!/bin/bash
-          set -e
-          LOG=/home/efinder/firstrun.log
-          exec > >(tee -a "$LOG") 2>&1
+          # ---------------------------------------------------------------
+          # prerun.sh — at stage ROOT, copies stage2 rootfs before anything
+          # else runs. This is what pi-gen requires to inherit the previous
+          # stage filesystem.
+          # ---------------------------------------------------------------
+          cat > stage-custom/prerun.sh <<'PRERUN'
+          #!/bin/bash -e
+          if [ ! -d "${ROOTFS_DIR}" ]; then
+            copy_previous
+          fi
+          PRERUN
+          chmod +x stage-custom/prerun.sh
 
-          echo "=== eFinder first-boot setup: $(date) ==="
+          # ---------------------------------------------------------------
+          # 00-packages — only what is needed at image build time.
+          # Everything else (pip, apt upgrade, etc.) runs at first boot
+          # via install.sh.
+          # ---------------------------------------------------------------
+          cat > stage-custom/00-install/00-packages <<'PKGS'
+          git
+          PKGS
 
-          source /home/efinder/config.env
-          export WIFI_PASS SAMBA_PASS
-
-          cd /home/efinder
-          bash /home/efinder/install.sh --non-interactive
-
-          systemctl disable firstrun.service
-          rm -f /etc/systemd/system/firstrun.service
-
-          echo "=== First-boot setup complete: $(date) ==="
-          reboot
-          EOF
-          chmod +x stage-custom/00-install/files/firstrun.sh
-
-      - name: Write firstrun.service
-        run: |
-          cat > stage-custom/00-install/files/firstrun.service <<'EOF'
+          # ---------------------------------------------------------------
+          # firstrun.service — systemd unit baked into the image.
+          # Runs on first boot when .run_firstrun trigger file is present.
+          # ---------------------------------------------------------------
+          cat > stage-custom/00-install/files/firstrun.service <<'SVC'
           [Unit]
           Description=eFinder first-boot setup
           After=network-online.target
           Wants=network-online.target
-          ConditionPathExists=/home/efinder/install.sh
+          ConditionPathExists=/home/efinder/.run_firstrun
 
           [Service]
           Type=oneshot
@@ -85,57 +75,118 @@ jobs:
 
           [Install]
           WantedBy=multi-user.target
-          EOF
-          
-      - name: Write prerun.sh
-        run: |
-          cat > stage-custom/prerun.sh <<'EOF'
-          #!/bin/bash -e
-          if [ ! -d "${ROOTFS_DIR}" ]; then
-            copy_previous
-          fi
-          EOF
-          chmod +x stage-custom/prerun.sh
-          
-      - name: Write 01-run.sh
-        run: |
-          cat > stage-custom/00-install/01-run.sh <<'EOF'
-          #!/bin/bash -e
+          SVC
 
-          echo "=== eFinder stage-custom: starting ==="
+          # ---------------------------------------------------------------
+          # firstrun.sh — runs on first boot.
+          # Fixes ownership, clones repo, runs install.sh, then reboots.
+          # To re-run: touch /home/efinder/.run_firstrun && sudo reboot
+          # ---------------------------------------------------------------
+          cat > stage-custom/00-install/files/firstrun.sh <<'FSH'
+          #!/bin/bash
+          set -e
+          LOG=/home/efinder/firstrun.log
+          exec > >(tee -a "$LOG") 2>&1
 
-          # Create efinder user home structure
-          install -d -m 755 /home/efinder
-          install -d -m 755 /home/efinder/Solver
+          echo "=== eFinder first-boot setup: $(date) ==="
 
-          # Copy app files into image
-          install -m 755 files/install.sh        /home/efinder/install.sh
-          install -m 755 files/Solver/eFinder.py /home/efinder/Solver/eFinder.py
-          install -m 644 files/Solver/eFinder.config /home/efinder/Solver/eFinder.config
-          install -m 644 files/Solver/starnames.csv /home/efinder/Solver/starnames.csv
-          install -m 644 files/Solver/test.npy /home/efinder/Solver/test.npy
-          install -m 644 files/Solver/text.ttf /home/efinder/Solver/text.ttf
-          install -m 600 files/config.env        /home/efinder/config.env
-
-          # Install firstrun script and service
-          install -m 755 files/firstrun.sh      /usr/local/bin/firstrun.sh
-          install -m 644 files/firstrun.service /etc/systemd/system/firstrun.service
-
-          # Enable firstrun service
-          systemctl enable firstrun.service
-
-          # Fix ownership
+          # Fix ownership now that the efinder user exists at runtime
           chown -R efinder:efinder /home/efinder
 
-          echo "=== eFinder stage-custom: complete ==="
-          EOF
-          chmod +x stage-custom/00-install/01-run.sh
+          # Load credentials baked into the image at build time
+          source /home/efinder/config.env
+          export WIFI_PASS SAMBA_PASS
 
-      - name: Write 00-packages
-        run: |
-          cat > stage-custom/00-install/00-packages <<'EOF'
-          git
+          # Clone the repo to get the latest install.sh and app files
+          cd /home/efinder
+          git clone https://github.com/mconsidine/eFinder_cli.git efinder-repo
+
+          # Run the installer non-interactively
+          bash /home/efinder/efinder-repo/install.sh --non-interactive
+
+          # Remove trigger file — service will skip on all subsequent boots
+          # To re-run: touch /home/efinder/.run_firstrun && sudo reboot
+          rm -f /home/efinder/.run_firstrun
+
+          echo "=== eFinder first-boot setup complete: $(date) ==="
+          reboot
+          FSH
+          chmod +x stage-custom/00-install/files/firstrun.sh
+
+          # ---------------------------------------------------------------
+          # config.env — credentials injected from GitHub secrets at build
+          # time. Mode 600 so only efinder user can read it.
+          # ---------------------------------------------------------------
+          cat > stage-custom/00-install/files/config.env <<EOF
+          WIFI_PASS="12345678"
+          SAMBA_PASS="12345678"
           EOF
+
+          # ---------------------------------------------------------------
+          # Copy app files from repo into the stage
+          # ---------------------------------------------------------------
+          cp install.sh                  stage-custom/00-install/files/install.sh
+          cp Solver/eFinder.py           stage-custom/00-install/files/Solver/eFinder.py
+          cp Solver/starnames.csv        stage-custom/00-install/files/Solver/starnames.csv
+          cp Solver/text.ttf             stage-custom/00-install/files/Solver/text.ttf
+          cp Solver/test.npy             stage-custom/00-install/files/Solver/test.npy
+          cp Solver/eFinder.config       stage-custom/00-install/files/Solver/eFinder.config
+
+          # ---------------------------------------------------------------
+          # 01-run.sh — runs inside the pi-gen chroot at BUILD time.
+          # Rules:
+          #   - Use ${ROOTFS_DIR} prefix for all file paths
+          #   - NO systemctl, NO pip, NO apt, NO network calls
+          #   - Service enabling done via symlink only
+          #   - NO chown (efinder user does not exist yet at build time)
+          # ---------------------------------------------------------------
+          cat > stage-custom/00-install/01-run.sh <<'RUN'
+          #!/bin/bash -e
+
+          echo "=== eFinder 01-run.sh: starting ==="
+
+          # Create directory structure inside the image
+          install -d -m 755 "${ROOTFS_DIR}/home/efinder"
+          install -d -m 755 "${ROOTFS_DIR}/home/efinder/Solver"
+
+          # Copy app files into the image
+          install -m 755 files/install.sh \
+              "${ROOTFS_DIR}/home/efinder/install.sh"
+          install -m 755 files/Solver/eFinder.py \
+              "${ROOTFS_DIR}/home/efinder/Solver/eFinder.py"
+          install -m 644 files/Solver/starnames.csv \
+              "${ROOTFS_DIR}/home/efinder/Solver/starnames.csv"
+          install -m 644 files/Solver/text.ttf \
+              "${ROOTFS_DIR}/home/efinder/Solver/text.ttf"
+          install -m 644 files/Solver/test.npy \
+              "${ROOTFS_DIR}/home/efinder/Solver/test.npy"
+          install -m 644 files/Solver/eFinder.config \
+              "${ROOTFS_DIR}/home/efinder/Solver/eFinder.config"
+
+          # Copy credentials — mode 600, efinder eyes only
+          install -m 600 files/config.env \
+              "${ROOTFS_DIR}/home/efinder/config.env"
+
+          # Install firstrun script and service into the image
+          install -m 755 files/firstrun.sh \
+              "${ROOTFS_DIR}/usr/local/bin/firstrun.sh"
+          install -m 644 files/firstrun.service \
+              "${ROOTFS_DIR}/etc/systemd/system/firstrun.service"
+
+          # Create the trigger file that tells firstrun.service to run
+          touch "${ROOTFS_DIR}/home/efinder/.run_firstrun"
+
+          # Enable firstrun.service via symlink — correct way in a chroot
+          # systemctl enable cannot be used at build time
+          mkdir -p \
+              "${ROOTFS_DIR}/etc/systemd/system/multi-user.target.wants"
+          ln -sf \
+              /etc/systemd/system/firstrun.service \
+              "${ROOTFS_DIR}/etc/systemd/system/multi-user.target.wants/firstrun.service"
+
+          echo "=== eFinder 01-run.sh: complete ==="
+          RUN
+          chmod +x stage-custom/00-install/01-run.sh
 
       - name: Build Raspberry Pi OS image
         uses: usimd/pi-gen-action@v1
@@ -149,7 +200,7 @@ jobs:
           compression: "xz"
           enable-ssh: 1
           username: "efinder"
-          password: "12345678"
+          password: ${{ secrets.EFINDER_PI_PASSWORD }}
           hostname: "efinder"
           locale: "en_US.UTF-8"
           keyboard-keymap: "us"
@@ -171,4 +222,3 @@ jobs:
           name: build-logs
           path: /tmp/pi-gen-action*/work/*/build.log
           retention-days: 3
-
