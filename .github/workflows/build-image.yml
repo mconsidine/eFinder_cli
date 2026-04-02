@@ -25,7 +25,7 @@ jobs:
       - name: Stage app files
         run: |
           cp install.sh stage-custom/files/install.sh
-          cp eFinder.py  stage-custom/files/eFinder.py
+          cp Solver/eFinder.py  stage-custom/files/eFinder.py
 
       - name: Build Raspberry Pi OS image
         uses: usimd/pi-gen-action@v1
