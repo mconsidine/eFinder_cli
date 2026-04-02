@@ -8,21 +8,26 @@
 # =============================================================================
 set -eo pipefail
 
-#if [[ "$1" == "--non-interactive" ]]; then
-#    # Credentials were exported by firstrun.sh from config.env
-#    : "${WIFI_SSID:?WIFI_SSID not set}"
-#    : "${WIFI_PASS:?WIFI_PASS not set}"
-#    : "${SAMBA_PASS:?SAMBA_PASS not set}"
-#else
-#    read -rp "WiFi SSID: " WIFI_SSID
-#    read -rsp "WiFi Password: " WIFI_PASS; echo
-#    read -rsp "Samba Password: " SAMBA_PASS; echo
-#fi
-
 EFINDER_HOME=/home/efinder
 EFINDER_USER=efinder
 VENV="$EFINDER_HOME/venv-efinder"
 INSTALL_MARKER="$EFINDER_HOME/.efinder_installed"
+
+# ---------------------------------------------------------------------------
+# Credentials — loaded from config.env if running non-interactively
+# ---------------------------------------------------------------------------
+if [[ "$1" == "--non-interactive" ]]; then
+    source /home/efinder/config.env
+else
+    read -rp  "WiFi Password: " WIFI_PASS
+    read -rsp "Samba Password: " SAMBA_PASS; echo
+fi
+
+# Generate SSID from this Pi's serial number — always done locally
+SERIAL=$(grep Serial /proc/cpuinfo | tail -c 5 | tr -d '\n')
+WIFI_SSID="eFinder-${SERIAL}"
+
+echo "WiFi SSID will be: $WIFI_SSID"
 
 # ---------------------------------------------------------------------------
 # Guard: must be run as the efinder user (with sudo), not as root directly.
