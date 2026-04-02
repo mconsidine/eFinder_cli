@@ -89,13 +89,13 @@ jobs:
           
       - name: Write prerun.sh
         run: |
-          cat > stage-custom/00-install/prerun.sh <<'EOF'
+          cat > stage-custom/prerun.sh <<'EOF'
           #!/bin/bash -e
           if [ ! -d "${ROOTFS_DIR}" ]; then
             copy_previous
           fi
           EOF
-          chmod +x stage-custom/00-install/prerun.sh
+          chmod +x stage-custom/prerun.sh
           
       - name: Write 01-run.sh
         run: |
