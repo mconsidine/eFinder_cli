@@ -1,4 +1,4 @@
-name: Build eFinder RPi Image v2
+name: Build eFinder RPi Image v2 — Cedar edition (offline)
 
 on:
   workflow_dispatch:
@@ -17,35 +17,82 @@ jobs:
                       /opt/ghc /opt/hostedtoolcache/CodeQL
           df -h
 
-      - name: Install required tools
+      - name: Install host tools
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y parted e2fsprogs
+          sudo apt-get install -y \
+            parted e2fsprogs \
+            qemu-user-static binfmt-support \
+            python3-pip
 
-      - name: Download official Raspberry Pi OS Lite
+      # -----------------------------------------------------------------------
+      # Register aarch64 QEMU interpreter so we can chroot into the arm64 image
+      # and run aarch64 binaries transparently on the x86_64 runner.
+      # -----------------------------------------------------------------------
+      - name: Register QEMU binfmt handlers
+        run: |
+          sudo update-binfmts --enable qemu-aarch64
+          # Verify the handler is in place
+          ls /proc/sys/fs/binfmt_misc/qemu-aarch64
+
+      # -----------------------------------------------------------------------
+      # Cross-compile cedar-detect-server for aarch64 using cross-rs.
+      # Done early so the binary is ready for the chroot install step.
+      # -----------------------------------------------------------------------
+      - name: Install Rust toolchain + cross
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          source "$HOME/.cargo/env"
+          rustup target add aarch64-unknown-linux-gnu
+          cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: Cache cedar-detect build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            cedar-detect/target
+          key: cedar-detect-aarch64-${{ hashFiles('cedar-detect/Cargo.toml', 'cedar-detect/Cargo.lock') }}
+          restore-keys: cedar-detect-aarch64-
+
+      - name: Clone cedar-detect
+        run: |
+          if [ ! -d cedar-detect ]; then
+            git clone https://github.com/smroid/cedar-detect.git
+          else
+            git -C cedar-detect pull
+          fi
+
+      - name: Cross-compile cedar-detect-server for aarch64
+        run: |
+          source "$HOME/.cargo/env"
+          cd cedar-detect
+          cross build --release --target aarch64-unknown-linux-gnu \
+              --bin cedar-detect-server
+          ls -lh target/aarch64-unknown-linux-gnu/release/cedar-detect-server
+
+      # -----------------------------------------------------------------------
+      # Download and unpack the base Raspberry Pi OS image.
+      # -----------------------------------------------------------------------
+      - name: Download Raspberry Pi OS Lite (arm64)
         run: |
           wget -q \
             https://downloads.raspberrypi.org/raspios_oldstable_lite_arm64/images/raspios_oldstable_lite_arm64-2025-11-24/2025-11-24-raspios-bookworm-arm64-lite.img.xz
           xz -d 2025-11-24-raspios-bookworm-arm64-lite.img.xz
 
-      - name: Write config.env
-        run: |
-          printf 'WIFI_PASS="12345678"\nSAMBA_PASS="12345678"\n' > config.env
-
-      - name: Write firstrun.sh and firstrun.service
-        run: |
-          echo IyEvYmluL2Jhc2gKc2V0IC1lCkxPRz0vaG9tZS9lZmluZGVyL2ZpcnN0cnVuLmxvZwpleGVjID4gPih0ZWUgLWEgIiRMT0ciKSAyPiYxCgplY2hvICI9PT0gZUZpbmRlciBmaXJzdC1ib290IHNldHVwOiAkKGRhdGUpID09PSIKCiMgV2FpdCBmb3IgaW50ZXJuZXQgYmVmb3JlIGF0dGVtcHRpbmcgZ2l0IGNsb25lCmVjaG8gIldhaXRpbmcgZm9yIGludGVybmV0IGNvbm5lY3Rpdml0eS4uLiIKY29ubmVjdGVkPWZhbHNlCmZvciBpIGluICQoc2VxIDEgMzApOyBkbwogICAgaWYgcGluZyAtYzEgLVcyIGdpdGh1Yi5jb20gJj4vZGV2L251bGw7IHRoZW4KICAgICAgICBjb25uZWN0ZWQ9dHJ1ZQogICAgICAgIGVjaG8gIiAgSW50ZXJuZXQgcmVhY2hhYmxlIGFmdGVyIGF0dGVtcHQgJGkiCiAgICAgICAgYnJlYWsKICAgIGZpCiAgICBlY2hvICIgIGF0dGVtcHQgJGkvMzAgLS0gcmV0cnlpbmcgaW4gMTBzLi4uIgogICAgc2xlZXAgMTAKZG9uZQoKaWYgWyAiJGNvbm5lY3RlZCIgIT0gInRydWUiIF07IHRoZW4KICAgIGVjaG8gIkVSUk9SOiBObyBpbnRlcm5ldCBhZnRlciA1IG1pbnV0ZXMgLS0gYWJvcnRpbmcgZmlyc3QtYm9vdCBzZXR1cC4iCiAgICBlY2hvICIgICAgICAgRW5zdXJlIHRoZSBQaSBoYXMgV2lGaSBvciBVU0IgZXRoZXJuZXQgb24gZmlyc3QgYm9vdC4iCiAgICBleGl0IDEKZmkKCiMgRml4IG93bmVyc2hpcCBub3cgdGhhdCB0aGUgZWZpbmRlciB1c2VyIGV4aXN0cyBhdCBydW50aW1lCmNob3duIC1SIGVmaW5kZXI6ZWZpbmRlciAvaG9tZS9lZmluZGVyCgojIExvYWQgYmFrZWQtaW4gY3JlZGVudGlhbHMgZnJvbSBjb25maWcuZW52CnNvdXJjZSAvaG9tZS9lZmluZGVyL2NvbmZpZy5lbnYKZXhwb3J0IFdJRklfUEFTUyBTQU1CQV9QQVNTCgojIENsb25lIHRoZSByZXBvIHRvIGdldCB0aGUgbGF0ZXN0IGluc3RhbGwuc2ggYW5kIFNvbHZlciBmaWxlcwpjZCAvaG9tZS9lZmluZGVyCmlmIFsgLWQgZWZpbmRlci1yZXBvIF07IHRoZW4KICAgIGVjaG8gIlJlcG8gYWxyZWFkeSBwcmVzZW50IC0tIHB1bGxpbmcgbGF0ZXN0Li4uIgogICAgZ2l0IC1DIGVmaW5kZXItcmVwbyBwdWxsIG9yaWdpbgplbHNlCiAgICBnaXQgY2xvbmUgaHR0cHM6Ly9naXRodWIuY29tL21jb25zaWRpbmUvZUZpbmRlcl9jbGkuZ2l0IGVmaW5kZXItcmVwbwpmaQoKIyBFbnN1cmUgcmVwbyBmaWxlcyBhcmUgb3duZWQgYnkgZWZpbmRlciwgbm90IHJvb3QKY2hvd24gLVIgZWZpbmRlcjplZmluZGVyIC9ob21lL2VmaW5kZXIvZWZpbmRlci1yZXBvCgojIFJ1biBpbnN0YWxsZXIgbm9uLWludGVyYWN0aXZlbHkKYmFzaCAvaG9tZS9lZmluZGVyL2VmaW5kZXItcmVwby9pbnN0YWxsLnNoIC0tbm9uLWludGVyYWN0aXZlCgojIFJlbW92ZSB0cmlnZ2VyIGZpbGUgLS0gZmlyc3RydW4uc2VydmljZSBza2lwcyBvbiBhbGwgc3Vic2VxdWVudCBib290cy4KIyBUbyByZS1ydW46IHRvdWNoIC9ob21lL2VmaW5kZXIvLnJ1bl9maXJzdHJ1biAmJiBzdWRvIHJlYm9vdApybSAtZiAvaG9tZS9lZmluZGVyLy5ydW5fZmlyc3RydW4KCmVjaG8gIj09PSBlRmluZGVyIGZpcnN0LWJvb3Qgc2V0dXAgY29tcGxldGU6ICQoZGF0ZSkgPT09IgpyZWJvb3QK | base64 -d > firstrun.sh
-          chmod +x firstrun.sh
-          echo W1VuaXRdCkRlc2NyaXB0aW9uPWVGaW5kZXIgZmlyc3QtYm9vdCBzZXR1cApBZnRlcj1uZXR3b3JrLW9ubGluZS50YXJnZXQKV2FudHM9bmV0d29yay1vbmxpbmUudGFyZ2V0CkNvbmRpdGlvblBhdGhFeGlzdHM9L2hvbWUvZWZpbmRlci8ucnVuX2ZpcnN0cnVuCgpbU2VydmljZV0KVHlwZT1vbmVzaG90CkV4ZWNTdGFydD0vdXNyL2xvY2FsL2Jpbi9maXJzdHJ1bi5zaApSZW1haW5BZnRlckV4aXQ9eWVzClN0YW5kYXJkT3V0cHV0PWpvdXJuYWwrY29uc29sZQpTdGFuZGFyZEVycm9yPWpvdXJuYWwrY29uc29sZQpUaW1lb3V0U3RhcnRTZWM9MTgwMAoKW0luc3RhbGxdCldhbnRlZEJ5PW11bHRpLXVzZXIudGFyZ2V0Cg== | base64 -d > firstrun.service
-
-      - name: Mount and customize image
+      # -----------------------------------------------------------------------
+      # Grow the image to fit all baked-in content.
+      # 2 GB gives comfortable room for packages, venv, and the star database.
+      # -----------------------------------------------------------------------
+      - name: Expand image and set up loop device
         run: |
           IMAGE=2025-11-24-raspios-bookworm-arm64-lite.img
-
-          truncate -s +256M $IMAGE
+          truncate -s +2G $IMAGE
 
           LOOP=$(sudo losetup -fP --show $IMAGE)
-          echo "Loop device: $LOOP"
+          echo "LOOP=$LOOP" >> $GITHUB_ENV
+          echo "IMAGE=$IMAGE" >> $GITHUB_ENV
 
           sudo parted -s $LOOP resizepart 2 100%
           sudo e2fsck -fy ${LOOP}p2 || true
@@ -55,12 +102,30 @@ jobs:
           sudo mount ${LOOP}p2 /mnt/pi
           sudo mount ${LOOP}p1 /mnt/pi/boot/firmware
 
-          sudo mkdir -p /mnt/pi/home/efinder/Solver
+          # Make QEMU available inside the chroot.
+          sudo cp /usr/bin/qemu-aarch64-static /mnt/pi/usr/bin/
 
-          sudo install -m 755 install.sh \
-              /mnt/pi/home/efinder/install.sh
-          sudo install -m 755 Solver/eFinder.py \
-              /mnt/pi/home/efinder/Solver/eFinder.py
+      # -----------------------------------------------------------------------
+      # Write config.env (default credentials baked into the image).
+      # Change these values before building if you want different defaults.
+      # -----------------------------------------------------------------------
+      - name: Write config.env
+        run: |
+          printf 'WIFI_PASS="12345678"\nSAMBA_PASS="12345678"\n' > config.env
+          sudo install -m 600 config.env /mnt/pi/home/efinder/config.env
+
+      # -----------------------------------------------------------------------
+      # Stage all repo files into the image before the chroot runs,
+      # so the chroot install step can find everything it needs locally.
+      # -----------------------------------------------------------------------
+      - name: Stage eFinder files into image
+        run: |
+          sudo mkdir -p /mnt/pi/home/efinder/Solver
+          sudo mkdir -p /mnt/pi/home/efinder/uploads
+
+          # Application and support files from the repo
+          sudo install -m 755 Solver/eFinder_cedar.py \
+              /mnt/pi/home/efinder/Solver/eFinder_cedar.py
           sudo install -m 644 Solver/starnames.csv \
               /mnt/pi/home/efinder/Solver/starnames.csv
           sudo install -m 644 Solver/text.ttf \
@@ -70,38 +135,410 @@ jobs:
           sudo install -m 644 Solver/eFinder.config \
               /mnt/pi/home/efinder/Solver/eFinder.config
 
-          sudo install -m 600 config.env \
-              /mnt/pi/home/efinder/config.env
+          # Web interface files
+          sudo mkdir -p /mnt/pi/var/www/html
+          sudo install -m 644 Solver/www/index.php    /mnt/pi/var/www/html/
+          sudo install -m 644 Solver/www/upload.php   /mnt/pi/var/www/html/
+          sudo install -m 644 Solver/www/updater.html /mnt/pi/var/www/html/
 
-          sudo install -m 755 firstrun.sh \
-              /mnt/pi/usr/local/bin/firstrun.sh
-          sudo install -m 644 firstrun.service \
-              /mnt/pi/etc/systemd/system/firstrun.service
+          # PHP ini overrides
+          sudo mkdir -p /mnt/pi/etc/php/8.2/apache2/conf.d
+          sudo mkdir -p /mnt/pi/etc/php/8.2/cli/conf.d
+          sudo install -m 644 Solver/www/user.ini \
+              /mnt/pi/etc/php/8.2/apache2/conf.d/user.ini
+          sudo install -m 644 Solver/www/user.ini \
+              /mnt/pi/etc/php/8.2/cli/conf.d/user.ini
 
-          sudo touch /mnt/pi/boot/firmware/ssh
+          # cedar-detect pre-built aarch64 binary
+          sudo install -m 755 \
+              cedar-detect/target/aarch64-unknown-linux-gnu/release/cedar-detect-server \
+              /mnt/pi/usr/local/bin/cedar-detect-server
 
+          # cedar-detect repo (needed only for the proto file; no Rust build on Pi)
+          sudo cp -r cedar-detect /mnt/pi/home/efinder/cedar-detect
+
+          # First-boot scripts
+          sudo install -m 755 install_cedar_v2.sh \
+              /mnt/pi/home/efinder/install_cedar_v2.sh
+
+      # -----------------------------------------------------------------------
+      # chroot into the arm64 image and perform all installation steps that
+      # would previously have required internet access on first boot:
+      #
+      #   - apt install all required packages
+      #   - Create Python venv and pip install cedar-solve, grpcio, etc.
+      #   - Compile gRPC proto stubs
+      #   - Generate the cedar-solve star database
+      #   - Configure Samba share definition (smb.conf entry only; password set at runtime)
+      #   - Write all systemd unit files
+      #   - Write fstab tmpfs entries
+      #   - Create efinder user and set up home directory skeleton
+      #   - Pre-create the WiFi AP connection profile (SSID updated at runtime)
+      #   - Write the OTA update helper
+      #   - Write all remaining static config
+      # -----------------------------------------------------------------------
+      - name: Install everything inside chroot
+        run: |
+          CHROOT="sudo chroot /mnt/pi"
+
+          # ------------------------------------------------------------------
+          # Bind-mount pseudo-filesystems needed by apt and systemctl.
+          # ------------------------------------------------------------------
+          sudo mount --bind /proc /mnt/pi/proc
+          sudo mount --bind /sys  /mnt/pi/sys
+          sudo mount --bind /dev  /mnt/pi/dev
+          sudo mount --bind /dev/pts /mnt/pi/dev/pts
+
+          # Prevent services from starting inside the chroot (they would fail).
+          sudo tee /mnt/pi/usr/sbin/policy-rc.d > /dev/null <<'EOF'
+          #!/bin/sh
+          exit 101
+          EOF
+          sudo chmod +x /mnt/pi/usr/sbin/policy-rc.d
+
+          # ------------------------------------------------------------------
+          # User: create efinder if it doesn't already exist in the base image.
+          # ------------------------------------------------------------------
+          $CHROOT id efinder &>/dev/null || \
+            $CHROOT adduser --disabled-password --gecos "" efinder
+
+          # ------------------------------------------------------------------
+          # Package installation
+          # ------------------------------------------------------------------
+          $CHROOT apt-get update -q
+          $CHROOT apt-get upgrade -y
+          $CHROOT apt-get install -y \
+            python3-pip \
+            python3-pil \
+            python3-pil.imagetk \
+            python3-smbus \
+            python3-picamera2 \
+            python3-scipy \
+            samba \
+            samba-common-bin \
+            apache2 \
+            php8.2 \
+            libapache2-mod-php8.2 \
+            protobuf-compiler \
+            unzip \
+            i2c-tools
+
+          # ------------------------------------------------------------------
+          # Python virtual environment
+          # ------------------------------------------------------------------
+          $CHROOT sudo -u efinder python3 -m venv \
+            /home/efinder/venv-efinder --system-site-packages
+          $CHROOT /home/efinder/venv-efinder/bin/pip install --upgrade pip
+          $CHROOT /home/efinder/venv-efinder/bin/pip install \
+            adafruit-circuitpython-adxl34x \
+            grpcio \
+            grpcio-tools \
+            cedar-solve
+
+          # ------------------------------------------------------------------
+          # Compile gRPC proto stubs from the cedar-detect repo staged earlier.
+          # Output goes directly into ~/Solver/ where eFinder_cedar.py imports them.
+          # ------------------------------------------------------------------
+          PROTO_SRC=/home/efinder/cedar-detect/src/proto/cedar_detect.proto
+          PROTO_OUT=/home/efinder/Solver
+
+          $CHROOT /home/efinder/venv-efinder/bin/python -m grpc_tools.protoc \
+            -I/home/efinder/cedar-detect/src/proto \
+            --python_out=$PROTO_OUT \
+            --pyi_out=$PROTO_OUT \
+            --grpc_python_out=$PROTO_OUT \
+            $PROTO_SRC
+
+          # The cedar-detect repo is no longer needed on the Pi after this.
+          sudo rm -rf /mnt/pi/home/efinder/cedar-detect
+
+          # ------------------------------------------------------------------
+          # Generate the cedar-solve star database inside the chroot.
+          # This runs under QEMU — expect it to take 10-20 minutes.
+          # ------------------------------------------------------------------
+          $CHROOT sudo -u efinder /home/efinder/venv-efinder/bin/python3 - <<'PYEOF'
+          import os, sys
+          home = "/home/efinder"
+          sys.path.insert(0, os.path.join(home, "Solver"))
+          import tetra3
+          db_path = os.path.join(home, "Solver", "cedar_database")
+          t3 = tetra3.Tetra3(load_database=None)
+          t3.generate_database(
+              max_fov=15,
+              min_fov=12,
+              save_as=db_path,
+              star_catalog='hip_main',
+              max_magnitude=8.0,
+              pattern_stars_per_fov=10,
+              catalog_stars_per_fov=20,
+          )
+          print("Database saved to", db_path + ".npz")
+          PYEOF
+
+          # ------------------------------------------------------------------
+          # Samba share definition (password is set at runtime by install_cedar_v2.sh).
+          # ------------------------------------------------------------------
+          grep -q "\[efindershare\]" /mnt/pi/etc/samba/smb.conf || \
+          sudo tee -a /mnt/pi/etc/samba/smb.conf > /dev/null <<'EOF'
+          [efindershare]
+          path = /home/efinder
+          writeable = Yes
+          create mask = 0777
+          directory mask = 0777
+          public = no
+          EOF
+
+          # ------------------------------------------------------------------
+          # Apache: disable default index so eFinder's index.php takes over.
+          # ------------------------------------------------------------------
+          if [ -f /mnt/pi/var/www/html/index.html ]; then
+            sudo mv /mnt/pi/var/www/html/index.html \
+                    /mnt/pi/var/www/html/apacheindex.html
+          fi
+          sudo chmod -R 755 /mnt/pi/var/www/html
+
+          # ------------------------------------------------------------------
+          # fstab tmpfs entries (activated at runtime by install_cedar_v2.sh).
+          # ------------------------------------------------------------------
+          grep -q "/var/tmp" /mnt/pi/etc/fstab || \
+            echo "tmpfs /var/tmp tmpfs nodev,nosuid,size=10M 0 0" | \
+            sudo tee -a /mnt/pi/etc/fstab > /dev/null
+
+          grep -q "/home/efinder/Solver/images" /mnt/pi/etc/fstab || \
+            echo "tmpfs /home/efinder/Solver/images tmpfs nodev,nosuid,size=10M 0 0" | \
+            sudo tee -a /mnt/pi/etc/fstab > /dev/null
+
+          sudo mkdir -p /mnt/pi/home/efinder/Solver/images
+
+          # ------------------------------------------------------------------
+          # sysctl: disable swap on Pi Zero 2W.
+          # ------------------------------------------------------------------
+          grep -q "vm.swappiness" /mnt/pi/etc/sysctl.conf || \
+            echo 'vm.swappiness = 0' | sudo tee -a /mnt/pi/etc/sysctl.conf > /dev/null
+
+          # ------------------------------------------------------------------
+          # WiFi AP connection profile (placeholder SSID — updated at runtime).
+          # NetworkManager connection files can be written directly to disk.
+          # ------------------------------------------------------------------
+          sudo mkdir -p /mnt/pi/etc/NetworkManager/system-connections
+          sudo tee /mnt/pi/etc/NetworkManager/system-connections/efinder-ap.nmconnection \
+            > /dev/null <<'EOF'
+          [connection]
+          id=efinder-ap
+          type=wifi
+          autoconnect=true
+          autoconnect-priority=100
+
+          [wifi]
+          mode=ap
+          ssid=efinder_PLACEHOLDER
+          band=bg
+          channel=6
+
+          [wifi-security]
+          key-mgmt=wpa-psk
+          psk=12345678
+
+          [ipv4]
+          method=shared
+          address1=192.168.50.1/24
+
+          [ipv6]
+          method=disabled
+          EOF
+          sudo chmod 600 \
+            /mnt/pi/etc/NetworkManager/system-connections/efinder-ap.nmconnection
+
+          # ------------------------------------------------------------------
+          # OTA update helper script.
+          # ------------------------------------------------------------------
+          sudo tee /mnt/pi/home/efinder/Solver/apply_update.sh > /dev/null <<'SHEOF'
+          #!/bin/bash
+          ZIPFILE="/home/efinder/uploads/efinderUpdate.zip"
+          if [ ! -f "$ZIPFILE" ]; then
+              echo "No update zip found — skipping."
+              exit 0
+          fi
+          echo "Update zip found — applying..."
+          if unzip -o "$ZIPFILE" -d /; then
+              find / -name "*.py" -newer "$ZIPFILE" -exec chmod a+rwx {} \; 2>/dev/null || true
+              rm -f "$ZIPFILE"
+              echo "Update applied — rebooting."
+              systemctl reboot
+          else
+              echo "Update failed — removing zip and continuing."
+              rm -f "$ZIPFILE"
+          fi
+          SHEOF
+          sudo chmod 755 /mnt/pi/home/efinder/Solver/apply_update.sh
+          sudo chown root:root /mnt/pi/home/efinder/Solver/apply_update.sh
+
+          # ------------------------------------------------------------------
+          # All systemd unit files written into the image.
+          # They are enabled at runtime by install_cedar_v2.sh (daemon-reload
+          # requires a running systemd and cannot run in a chroot).
+          # ------------------------------------------------------------------
+          sudo tee /mnt/pi/etc/systemd/system/cpu-performance.service > /dev/null <<'EOF'
+          [Unit]
+          Description=Set CPU governor to performance mode
+          After=sysinit.target
+
+          [Service]
+          Type=oneshot
+          RemainAfterExit=yes
+          ExecStart=/bin/sh -c 'echo performance | tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor'
+          StandardOutput=journal
+
+          [Install]
+          WantedBy=multi-user.target
+          EOF
+
+          sudo tee /mnt/pi/etc/systemd/system/efinder-update.service > /dev/null <<'EOF'
+          [Unit]
+          Description=eFinder OTA update checker
+          Before=efinder.service
+          After=local-fs.target
+
+          [Service]
+          Type=oneshot
+          RemainAfterExit=yes
+          User=root
+          WorkingDirectory=/home/efinder
+          ExecStart=/bin/bash /home/efinder/Solver/apply_update.sh
+          StandardOutput=journal
+          StandardError=journal
+
+          [Install]
+          WantedBy=multi-user.target
+          EOF
+
+          sudo tee /mnt/pi/etc/systemd/system/cedar-detect.service > /dev/null <<'EOF'
+          [Unit]
+          Description=Cedar-detect star detection gRPC server
+          After=local-fs.target
+          Before=efinder.service
+
+          [Service]
+          Type=simple
+          User=efinder
+          ExecStart=/usr/local/bin/cedar-detect-server --port 50051
+          Restart=on-failure
+          RestartSec=5
+          StandardOutput=journal
+          StandardError=journal
+
+          [Install]
+          WantedBy=multi-user.target
+          EOF
+
+          sudo tee /mnt/pi/etc/systemd/system/efinder.service > /dev/null <<'EOF'
+          [Unit]
+          Description=eFinder telescope plate solver (Cedar v2)
+          After=cedar-detect.service efinder-update.service
+          Wants=cedar-detect.service
+
+          [Service]
+          Type=simple
+          User=efinder
+          WorkingDirectory=/home/efinder/Solver
+          Environment=PATH=/home/efinder/venv-efinder/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+          ExecStartPre=/bin/sleep 2
+          ExecStart=/home/efinder/venv-efinder/bin/python /home/efinder/Solver/eFinder_cedar.py
+          Restart=on-failure
+          RestartSec=15
+          StartLimitIntervalSec=120
+          StartLimitBurst=4
+          StandardOutput=journal
+          StandardError=journal
+
+          [Install]
+          WantedBy=multi-user.target
+          EOF
+
+          # ------------------------------------------------------------------
+          # firstrun.service — triggers install_cedar_v2.sh on first boot only.
+          # ------------------------------------------------------------------
+          sudo tee /mnt/pi/etc/systemd/system/firstrun.service > /dev/null <<'EOF'
+          [Unit]
+          Description=eFinder first-boot finalisation
+          After=NetworkManager.service
+          Wants=NetworkManager.service
+          ConditionPathExists=/home/efinder/.run_firstrun
+
+          [Service]
+          Type=oneshot
+          ExecStart=/bin/bash /home/efinder/install_cedar_v2.sh
+          RemainAfterExit=yes
+          StandardOutput=journal+console
+          StandardError=journal+console
+          TimeoutStartSec=300
+
+          [Install]
+          WantedBy=multi-user.target
+          EOF
+
+          # Enable firstrun.service by symlinking into wants.
           sudo mkdir -p \
-              /mnt/pi/etc/systemd/system/multi-user.target.wants
+            /mnt/pi/etc/systemd/system/multi-user.target.wants
           sudo ln -sf \
-              /etc/systemd/system/firstrun.service \
-              /mnt/pi/etc/systemd/system/multi-user.target.wants/firstrun.service
+            /etc/systemd/system/firstrun.service \
+            /mnt/pi/etc/systemd/system/multi-user.target.wants/firstrun.service
 
+          # ------------------------------------------------------------------
+          # Trigger file: presence causes firstrun.service to run once.
+          # ------------------------------------------------------------------
           sudo touch /mnt/pi/home/efinder/.run_firstrun
 
-          sudo umount /mnt/pi/boot/firmware
-          sudo umount /mnt/pi
-          sudo losetup -d $LOOP
+          # ------------------------------------------------------------------
+          # Remove the policy-rc.d shim now that installation is done.
+          # ------------------------------------------------------------------
+          sudo rm -f /mnt/pi/usr/sbin/policy-rc.d
 
-          echo "Image customization complete"
+          echo "Chroot installation complete."
+
+      # -----------------------------------------------------------------------
+      # Enable SSH in the boot partition (touchfile method).
+      # -----------------------------------------------------------------------
+      - name: Enable SSH
+        run: |
+          sudo touch /mnt/pi/boot/firmware/ssh
+
+      # -----------------------------------------------------------------------
+      # Set correct ownership on the efinder home directory.
+      # The efinder UID inside the image is typically 1000; set explicitly.
+      # -----------------------------------------------------------------------
+      - name: Fix file ownership in image
+        run: |
+          # Resolve the efinder UID/GID from inside the image's passwd file.
+          EFINDER_UID=$(grep "^efinder:" /mnt/pi/etc/passwd | cut -d: -f3)
+          EFINDER_GID=$(grep "^efinder:" /mnt/pi/etc/passwd | cut -d: -f4)
+          echo "efinder UID=$EFINDER_UID GID=$EFINDER_GID"
+          sudo chown -R "${EFINDER_UID}:${EFINDER_GID}" /mnt/pi/home/efinder
+          # apply_update.sh must be owned by root
+          sudo chown root:root /mnt/pi/home/efinder/Solver/apply_update.sh
+
+      # -----------------------------------------------------------------------
+      # Unmount everything cleanly.
+      # -----------------------------------------------------------------------
+      - name: Unmount image
+        if: always()
+        run: |
+          sudo umount /mnt/pi/dev/pts  || true
+          sudo umount /mnt/pi/dev      || true
+          sudo umount /mnt/pi/sys      || true
+          sudo umount /mnt/pi/proc     || true
+          sudo umount /mnt/pi/boot/firmware || true
+          sudo umount /mnt/pi          || true
+          sudo losetup -d "$LOOP"      || true
 
       - name: Compress final image
         run: |
-          xz -T0 -z 2025-11-24-raspios-bookworm-arm64-lite.img
+          xz -T0 -z "$IMAGE"
           echo "Compression complete"
 
       - name: Generate artifact name
         run: |
-          echo "ARTIFACT_NAME=efinder_zero_$(date +%Y%m%d)" >> $GITHUB_ENV
+          echo "ARTIFACT_NAME=efinder_zero_cedar_v2_$(date +%Y%m%d)" >> $GITHUB_ENV
 
       - name: Upload image artifact
         uses: actions/upload-artifact@v6
