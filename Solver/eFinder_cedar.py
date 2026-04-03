@@ -46,7 +46,7 @@ import cedar_detect_pb2_grpc
 
 if len(sys.argv) > 1:
     print('Killing running version')
-    os.system('pkill -9 -f eFinder_cedar.py')
+    os.system('pkill -9 -f eFinder_cedar_v2.py')
 
 # ---------------------------------------------------------------------------
 # Config file
