@@ -292,10 +292,10 @@ jobs:
 
           $CHROOT /home/efinder/venv-efinder/bin/pip install --upgrade pip
           $CHROOT /home/efinder/venv-efinder/bin/pip install \
-            adafruit-circuitpython-adxl34x \
             grpcio \
             cedar-solve
-
+          # adafruit-circuitpython-adxl34x
+          
           # Remove the build-time pip.conf override so the venv behaves
           # normally on the Pi (falling back to system /etc/pip.conf).
           sudo rm -f /mnt/pi/home/efinder/venv-efinder/pip/pip.conf
