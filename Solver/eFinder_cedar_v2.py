@@ -36,6 +36,16 @@ import tetra3  # cedar-solve installs as the 'tetra3' module
 home_path = str(Path.home())
 version   = "6.6-cedar-v2"
 
+# ---------------------------------------------------------------------------
+# Feature flags
+# Set USE_ACCELEROMETER = True only if an ADXL343/345 is physically wired
+# to the I2C bus. When False the adafruit-circuitpython-adxl34x package
+# and all of its dependencies (adafruit-blinka, platformdetect, etc.) are
+# not imported, saving ~10 pip wheels and significant runtime memory.
+# getScopeAlt() returns "-2" (unknown) when the flag is False.
+# ---------------------------------------------------------------------------
+USE_ACCELEROMETER = False
+
 # Solver/ contains the pre-compiled gRPC stubs and the star database.
 solver_path = os.path.join(home_path, "Solver")
 if solver_path not in sys.path:
@@ -208,18 +218,22 @@ class Coordinates:
 coordinates = Coordinates()
 
 # ---------------------------------------------------------------------------
-# Accelerometer (optional)
+# Accelerometer (optional — governed by USE_ACCELEROMETER flag above)
 # ---------------------------------------------------------------------------
-try:
-    import board
-    import adafruit_adxl34x
-    i2c    = board.I2C()
-    angle  = adafruit_adxl34x.ADXL343(i2c)
-    altAngle = True
-    print('Accelerometer found')
-except Exception:
-    print('No accelerometer fitted')
+if USE_ACCELEROMETER:
+    try:
+        import board
+        import adafruit_adxl34x
+        i2c      = board.I2C()
+        angle    = adafruit_adxl34x.ADXL343(i2c)
+        altAngle = True
+        print('Accelerometer found')
+    except Exception as e:
+        print('Accelerometer initialisation failed:', e)
+        altAngle = False
+else:
     altAngle = False
+    print('Accelerometer disabled (USE_ACCELEROMETER = False)')
 
 # ---------------------------------------------------------------------------
 # Globals
