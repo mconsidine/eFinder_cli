@@ -23,8 +23,7 @@ jobs:
           sudo apt-get install -y \
             parted e2fsprogs \
             qemu-user-static binfmt-support \
-            python3-pip \
-            protobuf-compiler
+            python3-pip
 
       # -----------------------------------------------------------------------
       # Register aarch64 QEMU interpreter so we can chroot into the arm64 image
@@ -40,6 +39,12 @@ jobs:
       # Cross-compile cedar-detect-server for aarch64 using cross-rs.
       # Done early so the binary is ready for the chroot install step.
       # -----------------------------------------------------------------------
+      - name: Install protoc (host + cross)
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y protobuf-compiler
+          protoc --version
+          
       - name: Install Rust toolchain + cross
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
@@ -65,10 +70,25 @@ jobs:
             git -C cedar-detect pull
           fi
 
+      - name: Generate Python gRPC stubs (host)
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install grpcio grpcio-tools
+
+          python3 -m grpc_tools.protoc \
+            -I cedar-detect/src/proto \
+            --python_out=Solver \
+            --pyi_out=Solver \
+            --grpc_python_out=Solver \
+            cedar-detect/src/proto/cedar_detect.proto
+
+          ls -l Solver | grep cedar_detect || true
+
       - name: Cross-compile cedar-detect-server for aarch64
         run: |
           source "$HOME/.cargo/env"
           cd cedar-detect
+          export PROTOC=/usr/bin/protoc
           cross build --release --target aarch64-unknown-linux-gnu \
               --bin cedar-detect-server
           ls -lh target/aarch64-unknown-linux-gnu/release/cedar-detect-server
@@ -155,8 +175,8 @@ jobs:
               cedar-detect/target/aarch64-unknown-linux-gnu/release/cedar-detect-server \
               /mnt/pi/usr/local/bin/cedar-detect-server
 
-          # cedar-detect repo (needed only for the proto file; no Rust build on Pi)
-          sudo cp -r cedar-detect /mnt/pi/home/efinder/cedar-detect
+          ## cedar-detect repo (needed only for the proto file; no Rust build on Pi)
+          #sudo cp -r cedar-detect /mnt/pi/home/efinder/cedar-detect
 
           # First-boot scripts
           sudo install -m 755 install_cedar_v2.sh \
@@ -236,22 +256,22 @@ jobs:
             grpcio-tools \
             cedar-solve
 
-          # ------------------------------------------------------------------
-          # Compile gRPC proto stubs from the cedar-detect repo staged earlier.
-          # Output goes directly into ~/Solver/ where eFinder_cedar.py imports them.
-          # ------------------------------------------------------------------
-          PROTO_SRC=/home/efinder/cedar-detect/src/proto/cedar_detect.proto
-          PROTO_OUT=/home/efinder/Solver
+          ## ------------------------------------------------------------------
+          ## Compile gRPC proto stubs from the cedar-detect repo staged earlier.
+          ## Output goes directly into ~/Solver/ where eFinder_cedar.py imports them.
+          ## ------------------------------------------------------------------
+          #PROTO_SRC=/home/efinder/cedar-detect/src/proto/cedar_detect.proto
+          #PROTO_OUT=/home/efinder/Solver
 
-          $CHROOT /home/efinder/venv-efinder/bin/python -m grpc_tools.protoc \
-            -I/home/efinder/cedar-detect/src/proto \
-            --python_out=$PROTO_OUT \
-            --pyi_out=$PROTO_OUT \
-            --grpc_python_out=$PROTO_OUT \
-            $PROTO_SRC
+          #$CHROOT /home/efinder/venv-efinder/bin/python -m grpc_tools.protoc \
+          #  -I/home/efinder/cedar-detect/src/proto \
+          #  --python_out=$PROTO_OUT \
+          #  --pyi_out=$PROTO_OUT \
+          #  --grpc_python_out=$PROTO_OUT \
+          #  $PROTO_SRC
 
-          # The cedar-detect repo is no longer needed on the Pi after this.
-          sudo rm -rf /mnt/pi/home/efinder/cedar-detect
+          ## The cedar-detect repo is no longer needed on the Pi after this.
+          #sudo rm -rf /mnt/pi/home/efinder/cedar-detect
 
           # ------------------------------------------------------------------
           # Generate the cedar-solve star database inside the chroot.
