@@ -1,0 +1,417 @@
+name: Build eFinder RPi Image v2 — Cedar edition (offline)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Checkout repo
+        uses: actions/checkout@v6
+
+      - name: Fix hostname resolution
+        run: |
+          sudo hostnamectl set-hostname "runner-host"
+          echo "127.0.0.1 runner-host" | sudo tee -a /etc/hosts
+
+      - name: Free up runner disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android \
+                      /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h
+
+      # parted/e2fsprogs: image partitioning
+      # qemu-user-static/binfmt-support: aarch64 chroot
+      # gcc-aarch64-linux-gnu: cross-linker for cedar-detect (pulls in build-essential)
+      # python3-pip: grpcio-tools for stub generation on the host
+      - name: Install host tools
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y \
+            parted e2fsprogs \
+            qemu-user-static binfmt-support \
+            gcc-aarch64-linux-gnu \
+            python3-pip
+
+      - name: Register QEMU binfmt handlers
+        run: |
+          sudo update-binfmts --enable qemu-aarch64
+          ls /proc/sys/fs/binfmt_misc/qemu-aarch64
+
+      # -----------------------------------------------------------------------
+      # Install Rust and cross-compile cedar-detect-server for aarch64.
+      # Done on the x86_64 runner so the Pi never needs to build Rust itself.
+      # -----------------------------------------------------------------------
+      - name: Install Rust toolchain
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          source "$HOME/.cargo/env"
+          rustup target add aarch64-unknown-linux-gnu
+
+      - name: Clone cedar-detect
+        run: |
+          if [ ! -d cedar-detect ]; then
+            git clone https://github.com/smroid/cedar-detect.git
+          else
+            git -C cedar-detect pull
+          fi
+
+      - name: Cache cedar-detect build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            cedar-detect/target
+          key: cedar-detect-aarch64-${{ hashFiles('cedar-detect/Cargo.toml', 'cedar-detect/Cargo.lock') }}
+          restore-keys: cedar-detect-aarch64-
+
+      - name: Cross-compile cedar-detect-server for aarch64
+        run: |
+          source "$HOME/.cargo/env"
+          cd cedar-detect
+          export PKG_CONFIG_ALLOW_CROSS=1
+          export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+          export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
+          export CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++
+          export AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar
+          cargo build --release --target aarch64-unknown-linux-gnu \
+              --bin cedar-detect-server
+          ls -lh target/aarch64-unknown-linux-gnu/release/cedar-detect-server
+
+      # -----------------------------------------------------------------------
+      # Generate gRPC Python stubs on the host from the cloned proto file.
+      # The resulting .py files are staged into the image — no protoc on Pi.
+      # -----------------------------------------------------------------------
+      - name: Generate Python gRPC stubs (host)
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install grpcio grpcio-tools
+          python3 -m grpc_tools.protoc \
+            -I cedar-detect/src/proto \
+            --python_out=Solver \
+            --pyi_out=Solver \
+            --grpc_python_out=Solver \
+            cedar-detect/src/proto/cedar_detect.proto
+          ls -l Solver/cedar_detect_pb2*.py
+
+      # -----------------------------------------------------------------------
+      # Write the star-database generation script to disk using base64 so that
+      # no Python source appears at column 0 inside the YAML run block
+      # (unindented lines break YAML block scalars).
+      # To regenerate the base64: base64 -w0 generate_database.py
+      # -----------------------------------------------------------------------
+      - name: Write database generation script
+        run: |
+          echo aW1wb3J0IG9zLCBzeXMKaG9tZSA9ICcvaG9tZS9lZmluZGVyJwpzeXMucGF0aC5pbnNlcnQoMCwgb3MucGF0aC5qb2luKGhvbWUsICdTb2x2ZXInKSkKaW1wb3J0IHRldHJhMwpkYl9wYXRoID0gb3MucGF0aC5qb2luKGhvbWUsICdTb2x2ZXInLCAnY2VkYXJfZGF0YWJhc2UnKQp0MyA9IHRldHJhMy5UZXRyYTMobG9hZF9kYXRhYmFzZT1Ob25lKQp0My5nZW5lcmF0ZV9kYXRhYmFzZSgKICAgIG1heF9mb3Y9MTUsCiAgICBtaW5fZm92PTEyLAogICAgc2F2ZV9hcz1kYl9wYXRoLAogICAgc3Rhcl9jYXRhbG9nPSdoaXBfbWFpbicsCiAgICBtYXhfbWFnbml0dWRlPTguMCwKICAgIHBhdHRlcm5fc3RhcnNfcGVyX2Zvdj0xMCwKICAgIGNhdGFsb2dfc3RhcnNfcGVyX2Zvdj0yMCwKKQpwcmludCgnRGF0YWJhc2Ugc2F2ZWQgdG8nLCBkYl9wYXRoICsgJy5ucHonKQo= | base64 -d > generate_database.py
+          echo "--- generate_database.py ---"
+          cat generate_database.py
+
+      # -----------------------------------------------------------------------
+      # Download and unpack the base Raspberry Pi OS image.
+      # -----------------------------------------------------------------------
+      - name: Download Raspberry Pi OS Lite (arm64)
+        run: |
+          wget -q \
+            https://downloads.raspberrypi.org/raspios_oldstable_lite_arm64/images/raspios_oldstable_lite_arm64-2025-11-24/2025-11-24-raspios-bookworm-arm64-lite.img.xz
+          xz -d 2025-11-24-raspios-bookworm-arm64-lite.img.xz
+
+      # -----------------------------------------------------------------------
+      # Grow the image. 2 GB gives comfortable room for packages, venv, and
+      # the star database. The filename is hardcoded so later steps can
+      # reference it directly without relying on a cross-step shell variable.
+      # -----------------------------------------------------------------------
+      - name: Expand image and set up loop device
+        run: |
+          IMAGE=2025-11-24-raspios-bookworm-arm64-lite.img
+          truncate -s +2G "$IMAGE"
+
+          LOOP=$(sudo losetup -fP --show "$IMAGE")
+          echo "LOOP=$LOOP" >> "$GITHUB_ENV"
+
+          sudo parted -s "$LOOP" resizepart 2 100%
+          sudo e2fsck -fy "${LOOP}p2" || true
+          sudo resize2fs "${LOOP}p2"
+
+          sudo mkdir -p /mnt/pi/boot/firmware
+          sudo mount "${LOOP}p2" /mnt/pi
+          sudo mount "${LOOP}p1" /mnt/pi/boot/firmware
+
+          sudo cp /usr/bin/qemu-aarch64-static /mnt/pi/usr/bin/
+
+      - name: Write config.env
+        run: |
+          sudo mkdir -p /mnt/pi/home/efinder
+          printf 'WIFI_PASS="12345678"\nSAMBA_PASS="12345678"\n' > config.env
+          sudo install -m 600 -o 1000 -g 1000 config.env \
+              /mnt/pi/home/efinder/config.env
+
+      # -----------------------------------------------------------------------
+      # Stage all repo and generated files into the image before the chroot.
+      # -----------------------------------------------------------------------
+      - name: Stage eFinder files into image
+        run: |
+          sudo mkdir -p /mnt/pi/home/efinder/Solver
+          sudo mkdir -p /mnt/pi/home/efinder/uploads
+
+          # Application files
+          sudo install -m 755 Solver/eFinder_cedar_v2.py \
+              /mnt/pi/home/efinder/Solver/eFinder_cedar_v2.py
+          sudo install -m 644 Solver/starnames.csv \
+              /mnt/pi/home/efinder/Solver/starnames.csv
+          sudo install -m 644 Solver/text.ttf \
+              /mnt/pi/home/efinder/Solver/text.ttf
+          sudo install -m 644 Solver/test.npy \
+              /mnt/pi/home/efinder/Solver/test.npy
+          sudo install -m 644 Solver/eFinder.config \
+              /mnt/pi/home/efinder/Solver/eFinder.config
+
+          # gRPC stubs generated on the host above
+          sudo install -m 644 Solver/cedar_detect_pb2.py \
+              /mnt/pi/home/efinder/Solver/cedar_detect_pb2.py
+          sudo install -m 644 Solver/cedar_detect_pb2_grpc.py \
+              /mnt/pi/home/efinder/Solver/cedar_detect_pb2_grpc.py
+          # .pyi is optional (type hints only); skip gracefully if absent
+          sudo install -m 644 Solver/cedar_detect_pb2.pyi \
+              /mnt/pi/home/efinder/Solver/cedar_detect_pb2.pyi 2>/dev/null || true
+
+          # Database generation script (executed inside chroot, then deleted)
+          sudo install -m 644 generate_database.py \
+              /mnt/pi/home/efinder/generate_database.py
+
+          # Web interface files
+          sudo mkdir -p /mnt/pi/var/www/html
+          sudo install -m 644 Solver/www/index.php    /mnt/pi/var/www/html/
+          sudo install -m 644 Solver/www/upload.php   /mnt/pi/var/www/html/
+          sudo install -m 644 Solver/www/updater.html /mnt/pi/var/www/html/
+
+          # PHP ini overrides
+          sudo mkdir -p /mnt/pi/etc/php/8.2/apache2/conf.d
+          sudo mkdir -p /mnt/pi/etc/php/8.2/cli/conf.d
+          sudo install -m 644 Solver/www/user.ini \
+              /mnt/pi/etc/php/8.2/apache2/conf.d/user.ini
+          sudo install -m 644 Solver/www/user.ini \
+              /mnt/pi/etc/php/8.2/cli/conf.d/user.ini
+
+          # cedar-detect pre-built aarch64 binary
+          sudo install -m 755 \
+              cedar-detect/target/aarch64-unknown-linux-gnu/release/cedar-detect-server \
+              /mnt/pi/usr/local/bin/cedar-detect-server
+
+          # First-boot finalisation script
+          sudo install -m 755 install_cedar_v2.sh \
+              /mnt/pi/home/efinder/install_cedar_v2.sh
+
+      # -----------------------------------------------------------------------
+      # chroot: install all packages, venv, and star database so the Pi needs
+      # no internet on first boot.
+      # -----------------------------------------------------------------------
+      - name: Install everything inside chroot
+        run: |
+          sudo cp /etc/resolv.conf /mnt/pi/etc/resolv.conf
+
+          CHROOT="sudo chroot /mnt/pi"
+
+          sudo mount --bind /proc    /mnt/pi/proc
+          sudo mount --bind /sys     /mnt/pi/sys
+          sudo mount --bind /dev     /mnt/pi/dev
+          sudo mount --bind /dev/pts /mnt/pi/dev/pts
+
+          # Prevent services from auto-starting inside the chroot.
+          printf '#!/bin/sh\nexit 101\n' | sudo tee /mnt/pi/usr/sbin/policy-rc.d > /dev/null
+          sudo chmod +x /mnt/pi/usr/sbin/policy-rc.d
+
+          # Create efinder user if not present in the base image.
+          $CHROOT id efinder &>/dev/null || \
+            $CHROOT adduser --disabled-password --gecos "" efinder
+
+          # ------------------------------------------------------------------
+          # Package installation.
+          #
+          # Removed vs. earlier versions:
+          #   protobuf-compiler  — stubs pre-generated on host, not needed on Pi
+          #   python3-pip        — venv manages its own pip
+          #   python3-pil.imagetk — Tk GUI bindings, not needed headless
+          #   i2c-tools          — debug CLI only, not required at runtime
+          #   build-essential    — no compilation happens on the Pi in v2
+          #   pkg-config         — no compilation happens on the Pi in v2
+          #   libssl-dev         — no compilation happens on the Pi in v2
+          #   curl               — no downloads happen on the Pi in v2
+          # ------------------------------------------------------------------
+          $CHROOT apt-get update -q
+          $CHROOT apt-get upgrade -y
+          $CHROOT apt-get install -y \
+            python3-pil \
+            python3-smbus \
+            python3-picamera2 \
+            python3-scipy \
+            samba \
+            samba-common-bin \
+            apache2 \
+            php8.2 \
+            libapache2-mod-php8.2 \
+            unzip
+
+          # ------------------------------------------------------------------
+          # Python virtual environment.
+          #
+          # Removed vs. earlier versions:
+          #   gdown  — only needed in the tetra3 edition to fetch the database
+          #            from Google Drive; cedar-solve generates its own locally
+          # ------------------------------------------------------------------
+          $CHROOT chown efinder:efinder /home/efinder
+          $CHROOT su -s /bin/bash efinder -c \
+            "python3 -m venv /home/efinder/venv-efinder --system-site-packages"
+          $CHROOT /home/efinder/venv-efinder/bin/pip install --upgrade pip
+          $CHROOT /home/efinder/venv-efinder/bin/pip install \
+            adafruit-circuitpython-adxl34x \
+            grpcio \
+            cedar-solve
+
+          # ------------------------------------------------------------------
+          # Generate the cedar-solve star database inside the chroot (QEMU).
+          # Runs under QEMU aarch64 — expect 10-20 minutes on the runner.
+          # ------------------------------------------------------------------
+          $CHROOT su -s /bin/bash efinder -c \
+            "/home/efinder/venv-efinder/bin/python3 /home/efinder/generate_database.py"
+
+          sudo rm -f /mnt/pi/home/efinder/generate_database.py
+
+          # ------------------------------------------------------------------
+          # Samba share definition (password set at runtime).
+          # ------------------------------------------------------------------
+          grep -q '\[efindershare\]' /mnt/pi/etc/samba/smb.conf || \
+            printf '\n[efindershare]\npath = /home/efinder\nwriteable = Yes\ncreate mask = 0777\ndirectory mask = 0777\npublic = no\n' | \
+            sudo tee -a /mnt/pi/etc/samba/smb.conf > /dev/null
+
+          # ------------------------------------------------------------------
+          # Apache: disable default index so eFinder's index.php takes over.
+          # ------------------------------------------------------------------
+          if [ -f /mnt/pi/var/www/html/index.html ]; then
+            sudo mv /mnt/pi/var/www/html/index.html \
+                    /mnt/pi/var/www/html/apacheindex.html
+          fi
+          sudo chmod -R 755 /mnt/pi/var/www/html
+
+          # ------------------------------------------------------------------
+          # fstab tmpfs entries (activated at runtime by install_cedar_v2.sh).
+          # ------------------------------------------------------------------
+          grep -q '/var/tmp' /mnt/pi/etc/fstab || \
+            echo 'tmpfs /var/tmp tmpfs nodev,nosuid,size=10M 0 0' | \
+            sudo tee -a /mnt/pi/etc/fstab > /dev/null
+
+          grep -q '/home/efinder/Solver/images' /mnt/pi/etc/fstab || \
+            echo 'tmpfs /home/efinder/Solver/images tmpfs nodev,nosuid,size=10M 0 0' | \
+            sudo tee -a /mnt/pi/etc/fstab > /dev/null
+
+          sudo mkdir -p /mnt/pi/home/efinder/Solver/images
+
+          # ------------------------------------------------------------------
+          # sysctl: disable swap on Pi Zero 2W.
+          # ------------------------------------------------------------------
+          grep -q 'vm.swappiness' /mnt/pi/etc/sysctl.conf || \
+            echo 'vm.swappiness = 0' | \
+            sudo tee -a /mnt/pi/etc/sysctl.conf > /dev/null
+
+          # ------------------------------------------------------------------
+          # WiFi AP connection profile (placeholder SSID; updated at runtime).
+          # ------------------------------------------------------------------
+          sudo mkdir -p /mnt/pi/etc/NetworkManager/system-connections
+          printf '[connection]\nid=efinder-ap\ntype=wifi\nautoconnect=true\nautoconnect-priority=100\n\n[wifi]\nmode=ap\nssid=efinder_PLACEHOLDER\nband=bg\nchannel=6\n\n[wifi-security]\nkey-mgmt=wpa-psk\npsk=12345678\n\n[ipv4]\nmethod=shared\naddress1=192.168.50.1/24\n\n[ipv6]\nmethod=disabled\n' | \
+            sudo tee /mnt/pi/etc/NetworkManager/system-connections/efinder-ap.nmconnection > /dev/null
+          sudo chmod 600 \
+            /mnt/pi/etc/NetworkManager/system-connections/efinder-ap.nmconnection
+
+          # ------------------------------------------------------------------
+          # OTA update helper script.
+          # ------------------------------------------------------------------
+          printf '#!/bin/bash\nZIPFILE="/home/efinder/uploads/efinderUpdate.zip"\nif [ ! -f "$ZIPFILE" ]; then\n    echo "No update zip found -- skipping."\n    exit 0\nfi\necho "Update zip found -- applying..."\nif unzip -o "$ZIPFILE" -d /; then\n    find / -name "*.py" -newer "$ZIPFILE" -exec chmod a+rwx {} \\; 2>/dev/null || true\n    rm -f "$ZIPFILE"\n    echo "Update applied -- rebooting."\n    systemctl reboot\nelse\n    echo "Update failed -- removing zip and continuing."\n    rm -f "$ZIPFILE"\nfi\n' | \
+            sudo tee /mnt/pi/home/efinder/Solver/apply_update.sh > /dev/null
+          sudo chmod 755 /mnt/pi/home/efinder/Solver/apply_update.sh
+          sudo chown root:root /mnt/pi/home/efinder/Solver/apply_update.sh
+
+          # ------------------------------------------------------------------
+          # Systemd unit files written directly with printf.
+          # Units are enabled at runtime by install_cedar_v2.sh.
+          # ------------------------------------------------------------------
+          printf '[Unit]\nDescription=Set CPU governor to performance mode\nAfter=sysinit.target\n\n[Service]\nType=oneshot\nRemainAfterExit=yes\nExecStart=/bin/sh -c '"'"'echo performance | tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor'"'"'\nStandardOutput=journal\n\n[Install]\nWantedBy=multi-user.target\n' | \
+            sudo tee /mnt/pi/etc/systemd/system/cpu-performance.service > /dev/null
+
+          printf '[Unit]\nDescription=eFinder OTA update checker\nBefore=efinder.service\nAfter=local-fs.target\n\n[Service]\nType=oneshot\nRemainAfterExit=yes\nUser=root\nWorkingDirectory=/home/efinder\nExecStart=/bin/bash /home/efinder/Solver/apply_update.sh\nStandardOutput=journal\nStandardError=journal\n\n[Install]\nWantedBy=multi-user.target\n' | \
+            sudo tee /mnt/pi/etc/systemd/system/efinder-update.service > /dev/null
+
+          printf '[Unit]\nDescription=Cedar-detect star detection gRPC server\nAfter=local-fs.target\nBefore=efinder.service\n\n[Service]\nType=simple\nUser=efinder\nExecStart=/usr/local/bin/cedar-detect-server --port 50051\nRestart=on-failure\nRestartSec=5\nStandardOutput=journal\nStandardError=journal\n\n[Install]\nWantedBy=multi-user.target\n' | \
+            sudo tee /mnt/pi/etc/systemd/system/cedar-detect.service > /dev/null
+
+          printf '[Unit]\nDescription=eFinder telescope plate solver (Cedar v2)\nAfter=cedar-detect.service efinder-update.service\nWants=cedar-detect.service\n\n[Service]\nType=simple\nUser=efinder\nWorkingDirectory=/home/efinder/Solver\nEnvironment=PATH=/home/efinder/venv-efinder/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\nExecStartPre=/bin/sleep 2\nExecStart=/home/efinder/venv-efinder/bin/python /home/efinder/Solver/eFinder_cedar_v2.py\nRestart=on-failure\nRestartSec=15\nStartLimitIntervalSec=120\nStartLimitBurst=4\nStandardOutput=journal\nStandardError=journal\n\n[Install]\nWantedBy=multi-user.target\n' | \
+            sudo tee /mnt/pi/etc/systemd/system/efinder.service > /dev/null
+
+          printf '[Unit]\nDescription=eFinder first-boot finalisation\nAfter=NetworkManager.service\nWants=NetworkManager.service\nConditionPathExists=/home/efinder/.run_firstrun\n\n[Service]\nType=oneshot\nExecStart=/bin/bash /home/efinder/install_cedar_v2.sh\nRemainAfterExit=yes\nStandardOutput=journal+console\nStandardError=journal+console\nTimeoutStartSec=300\n\n[Install]\nWantedBy=multi-user.target\n' | \
+            sudo tee /mnt/pi/etc/systemd/system/firstrun.service > /dev/null
+
+          # Symlink firstrun.service so it runs automatically on first boot.
+          sudo mkdir -p /mnt/pi/etc/systemd/system/multi-user.target.wants
+          sudo ln -sf \
+            /etc/systemd/system/firstrun.service \
+            /mnt/pi/etc/systemd/system/multi-user.target.wants/firstrun.service
+
+          # Trigger file: presence causes firstrun.service to fire once.
+          sudo touch /mnt/pi/home/efinder/.run_firstrun
+
+          sudo rm -f /mnt/pi/usr/sbin/policy-rc.d
+
+          echo "Chroot installation complete."
+
+      - name: Enable SSH
+        run: |
+          sudo touch /mnt/pi/boot/firmware/ssh
+
+      - name: Fix file ownership in image
+        run: |
+          EFINDER_UID=$(grep "^efinder:" /mnt/pi/etc/passwd | cut -d: -f3)
+          EFINDER_GID=$(grep "^efinder:" /mnt/pi/etc/passwd | cut -d: -f4)
+          echo "efinder UID=$EFINDER_UID GID=$EFINDER_GID"
+          sudo chown -R "${EFINDER_UID}:${EFINDER_GID}" /mnt/pi/home/efinder
+          sudo chown root:root /mnt/pi/home/efinder/Solver/apply_update.sh
+
+      - name: Unmount image
+        if: always()
+        run: |
+          sudo umount -l /mnt/pi/dev/pts       || true
+          sudo umount -l /mnt/pi/dev            || true
+          sudo umount -l /mnt/pi/sys            || true
+          sudo umount -l /mnt/pi/proc           || true
+          sudo umount -l /mnt/pi/boot/firmware  || true
+          sudo umount -l /mnt/pi                || true
+          sudo losetup -D                       || true
+
+      # IMAGE filename is hardcoded to avoid cross-step shell variable loss.
+      - name: Compress final image
+        run: |
+          xz -T0 -z 2025-11-24-raspios-bookworm-arm64-lite.img
+          echo "Compression complete"
+
+      - name: Generate artifact name
+        run: |
+          echo "ARTIFACT_NAME=efinder_zero_cedar_v2_$(date +%Y%m%d)" >> "$GITHUB_ENV"
+
+      - name: Upload image artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: 2025-11-24-raspios-bookworm-arm64-lite.img.xz
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload build logs on failure
+        if: failure()
+        run: |
+          echo "=== Loop devices ==="
+          sudo losetup -l
+          echo "=== Mounted filesystems ==="
+          mount | grep pi || true
+          echo "=== Disk space ==="
+          df -h
