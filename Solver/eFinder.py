@@ -3,6 +3,16 @@
 # eFinder — electronic finder scope, plate-solving over LX200/WiFi for SkySafari
 # Derived from original work Copyright (C) 2025 Keith Venables (GPL v3)
 # Simplified: direct picamera2, no Nexus, no GPIO, no LED, no WiFi switching
+#
+# Cedar edition v2:
+#   - Fully offline — no internet required at any boot.
+#   - Star detection: cedar-detect (Rust gRPC microservice, pre-built in image)
+#   - Plate solving: cedar-solve (pre-installed in image venv)
+#   - Database: cedar_database.npz pre-generated in image
+#   - gRPC stubs: pre-compiled into ~/Solver/ in image
+#
+# The cedar-detect-server systemd unit starts before this script.
+# It listens on localhost:50051.
 
 import os
 import sys
@@ -15,21 +25,28 @@ from threading import Thread
 from pathlib import Path
 
 import numpy as np
+import grpc
 from PIL import Image, ImageDraw, ImageFont, ImageEnhance, ImageOps
 from picamera2 import Picamera2
-import tetra3
+import tetra3  # cedar-solve installs as the 'tetra3' module
 
 # ---------------------------------------------------------------------------
 # Paths and startup
 # ---------------------------------------------------------------------------
 home_path = str(Path.home())
-version   = "6.6"
+version   = "6.6-cedar-v2"
 
-# If invoked with an argument, kill any already-running instance first.
-# (Allows manual restart from SSH without rebooting.)
+# Solver/ contains the pre-compiled gRPC stubs and the star database.
+solver_path = os.path.join(home_path, "Solver")
+if solver_path not in sys.path:
+    sys.path.insert(0, solver_path)
+
+import cedar_detect_pb2
+import cedar_detect_pb2_grpc
+
 if len(sys.argv) > 1:
     print('Killing running version')
-    os.system('pkill -9 -f eFinder.py')
+    os.system('pkill -9 -f eFinder_cedar.py')
 
 # ---------------------------------------------------------------------------
 # Config file
@@ -47,6 +64,51 @@ def save_param():
     with open(config_path, "w") as h:
         for key, value in param.items():
             h.write("%s:%s\n" % (key, value))
+
+# ---------------------------------------------------------------------------
+# Cedar-detect gRPC client
+# ---------------------------------------------------------------------------
+CEDAR_DETECT_ADDR = "localhost:50051"
+
+def _make_detect_channel():
+    return grpc.insecure_channel(CEDAR_DETECT_ADDR)
+
+_detect_channel  = _make_detect_channel()
+_detect_stub     = cedar_detect_pb2_grpc.CedarDetectStub(_detect_channel)
+
+def get_centroids_cedar(np_image: np.ndarray) -> np.ndarray:
+    """Call cedar-detect gRPC server; return (N,2) array of (row,col) centroids."""
+    global _detect_channel, _detect_stub
+
+    assert np_image.dtype == np.uint8
+    h, w = np_image.shape
+
+    request = cedar_detect_pb2.ImageRequest(
+        image_data=np_image.tobytes(),
+        image_width=w,
+        image_height=h,
+        bpp=8,
+    )
+
+    try:
+        response = _detect_stub.DetectStars(request, timeout=10.0)
+    except grpc.RpcError as e:
+        print("cedar-detect gRPC error:", e.code(), e.details())
+        print("Attempting to reconnect cedar-detect channel...")
+        try:
+            _detect_channel.close()
+        except Exception:
+            pass
+        _detect_channel = _make_detect_channel()
+        _detect_stub    = cedar_detect_pb2_grpc.CedarDetectStub(_detect_channel)
+        return np.empty((0, 2), dtype=np.float64)
+
+    # cedar-detect returns (col, row); tetra3 expects (row, col), brightest-first.
+    centroids = np.array(
+        [(s.centroid_y, s.centroid_x) for s in response.star_centroids],
+        dtype=np.float64,
+    )
+    return centroids
 
 # ---------------------------------------------------------------------------
 # Camera  (IMX477 via picamera2, YUV420, Y-channel only)
@@ -74,19 +136,14 @@ class Camera:
         self.picam2.start()
 
     def capture(self, test=False):
-        """Return Y-channel numpy array (760x960 uint8).
-        If test=True and a test image exists on disk, use it instead of
-        the live camera — useful for debugging over SSH without a sky view."""
         test_path = os.path.join(home_path, "Solver/test.npy")
         if test and os.path.exists(test_path):
             return np.load(test_path)
         array = np.array(self.picam2.capture_array())
-        return array[0:760, 0:960]   # Y plane from YUV420
+        return array[0:760, 0:960]
 
 # ---------------------------------------------------------------------------
-# Coordinates — inlined from Coordinates_wifi_2.py
-# Newcomb first-order precession: accurate to ~1 arcminute, sufficient for
-# a finder scope.  No external dependencies beyond math / datetime / os.
+# Coordinates
 # ---------------------------------------------------------------------------
 class Coordinates:
     def __init__(self):
@@ -94,19 +151,17 @@ class Coordinates:
         print('Coordinates ready')
 
     def _update_precession_constants(self):
-        """Recalculate precession constants from current date."""
         now  = datetime.now()
         decY = now.year + int(now.strftime('%j')) / 365.25
-        self.t = decY - 2000          # years since J2000
+        self.t = decY - 2000
         self.T = self.t / 100
         self.m  = 3.07496 + 0.00186 * self.T
         self.n2 = 20.0431 - 0.0085  * self.T
         self.n1 = 1.33621 - 0.00057 * self.T
 
     def dateSet(self, timeOffset, timeStr, dateStr):
-        """Receive date/time from SkySafari, set system clock, refresh constants."""
         days = 0
-        sg   = float(timeOffset)          # hours to add to local time -> UTC
+        sg   = float(timeOffset)
         hours, minutes, seconds = timeStr.split(':')
         hours = int(hours) + sg
         if hours >= 24:
@@ -121,13 +176,12 @@ class Coordinates:
         month, day, year = dateStr.split('/')
         day     = str(int(day) + days)
         dateStr = month + '/' + day + '/20' + year
-        dt_str  = dateStr + ' ' + timeStr      # format: %m/%d/%Y %H:%M:%S
+        dt_str  = dateStr + ' ' + timeStr
         print('Calculated UTC', dt_str)
         os.system('sudo date -u --set "%s"' % dt_str + '.000Z')
         self._update_precession_constants()
 
     def precess(self, r, d):
-        """J2000 RA & Dec (decimal degrees) -> JNow (decimal degrees)."""
         dR = self.m + self.n1 * math.sin(math.radians(r)) * math.tan(math.radians(d))
         dD = self.n2 * math.cos(math.radians(r))
         r  = r + dR / 240 * self.t
@@ -135,20 +189,17 @@ class Coordinates:
         return r, d
 
     def hh2dms(self, dd):
-        """Decimal hours -> 'HH:MM:SS' string (no sign, for LX200 RA)."""
         minutes, seconds = divmod(abs(dd) * 3600, 60)
         degrees, minutes = divmod(minutes, 60)
         return '%02d:%02d:%02d' % (degrees, minutes, seconds)
 
     def dd2aligndms(self, dd):
-        """Decimal degrees -> '+/-DD*MM:SS' string (LX200 Dec format)."""
         sign             = '+' if dd >= 0 else '-'
         minutes, seconds = divmod(abs(dd) * 3600, 60)
         degrees, minutes = divmod(minutes, 60)
         return '%s%02d*%02d:%02d' % (sign, degrees, minutes, seconds)
 
     def dd2dms(self, dd):
-        """Decimal degrees -> '+/-DD:MM:SS' string."""
         sign             = '+' if dd >= 0 else '-'
         minutes, seconds = divmod(abs(dd) * 3600, 60)
         degrees, minutes = divmod(minutes, 60)
@@ -157,7 +208,7 @@ class Coordinates:
 coordinates = Coordinates()
 
 # ---------------------------------------------------------------------------
-# Accelerometer (optional — graceful fallback if not fitted)
+# Accelerometer (optional)
 # ---------------------------------------------------------------------------
 try:
     import board
@@ -187,25 +238,22 @@ offset_str   = "0,0"
 keep         = False
 frame        = 0
 
-expInc = 0.1   # exposure increment per manual step (seconds)
-gainInc = 5    # gain increment per manual step
+expInc  = 0.1
+gainInc = 5
 
 fnt = ImageFont.truetype(os.path.join(home_path, "Solver/text.ttf"), 16)
-
-# Camera field-of-view constants  (width_px, height_px, arcsec/px, fov_deg)
 cam = (960, 760, 50.8, 13.5)
 
 # ---------------------------------------------------------------------------
-# Camera and Tetra3 initialisation
+# Camera and cedar-solve initialisation
 # ---------------------------------------------------------------------------
 camera = Camera()
 camera.set(float(param.get("Exposure", "0.1")), param.get("Gain", "10"))
 
-print('Loading Tetra3 database...')
-t3 = tetra3.Tetra3('t3_fov14_mag8')
-print('Tetra3 ready')
+print('Loading cedar-solve database...')
+t3 = tetra3.Tetra3('cedar_database')
+print('cedar-solve ready')
 
-# Restore saved offset
 pix_x, pix_y = (
     float(param.get("d_x", "0")) / 60,
     float(param.get("d_y", "0")) / 60,
@@ -226,8 +274,6 @@ _ox, _oy = dxdy2pixel(
     float(param.get("d_x", "0")) / 60,
     float(param.get("d_y", "0")) / 60,
 )
-# Note: tetra3 target_pixel expects (row, col) i.e. (y, x).
-# dxdy2pixel returns (pix_x, pix_y) i.e. (col, row), so we swap deliberately.
 offset = (_oy, _ox)
 print('Offset:', offset)
 
@@ -247,9 +293,10 @@ def solveImage(img):
     start_time = time.time()
     print("Started solving")
 
-    np_image  = img if img.dtype == np.uint8 else img.astype(np.uint8)
-    centroids = tetra3.get_centroids_from_image(np_image, downsample=2)
-    print('Centroids:', len(centroids), '  Peak:', np.max(np_image))
+    np_image = img if img.dtype == np.uint8 else img.astype(np.uint8)
+    centroids = get_centroids_cedar(np_image)
+    img_peak  = int(np.max(np_image))
+    print('Centroids (cedar):', len(centroids), '  Peak:', img_peak)
 
     if len(centroids) < 15:
         print("Bad image — only %d centroids" % len(centroids))
@@ -260,7 +307,7 @@ def solveImage(img):
         return
 
     stars = '%4d' % len(centroids)
-    peak  = '%3d' % np.max(np_image)
+    peak  = '%3d' % img_peak
 
     solution = t3.solve_from_centroids(
         centroids,
@@ -289,8 +336,7 @@ def solveImage(img):
 
     if keep:
         saveImage(img, "Peak=%d  Stars=%d  Exp=%ss  Gain=%s" % (
-            np.max(np_image), int(centroids.size),
-            param['Exposure'], param['Gain']))
+            img_peak, len(centroids), param['Exposure'], param['Gain']))
 
     radec        = '%6.4f %+6.4f' % (ra, dec)
     solved_radec = ra, dec
@@ -299,7 +345,7 @@ def solveImage(img):
     solve = True
 
 # ---------------------------------------------------------------------------
-# Image saving (debug / alignment frames)
+# Image saving
 # ---------------------------------------------------------------------------
 def saveImage(array, txt):
     global frame, keep
@@ -316,7 +362,7 @@ def saveImage(array, txt):
         frame = 0
 
 # ---------------------------------------------------------------------------
-# Continuous solve loop (runs in its own thread)
+# Continuous solve loop
 # ---------------------------------------------------------------------------
 def loop_solve():
     while True:
@@ -325,7 +371,7 @@ def loop_solve():
             solveImage(capArray)
             print('****************')
         else:
-            time.sleep(0.05)   # avoid busy-spin while offset measurement runs
+            time.sleep(0.05)
 
 # ---------------------------------------------------------------------------
 # Exposure / gain helpers
@@ -357,15 +403,13 @@ def setExp(a):
     return '1'
 
 def getAutoExp():
-    """Auto-expose: adjust until 20-50 centroids and peak not saturated.
-    Bounded to max_iter iterations to prevent infinite oscillation."""
     expAuto = float(param['Exposure'])
     camera.set(expAuto, param['Gain'])
     np_image = capture()
     max_iter = 20
     for _ in range(max_iter):
-        pk        = np.max(np_image)
-        centroids = tetra3.get_centroids_from_image(np_image, downsample=1)
+        pk        = int(np.max(np_image))
+        centroids = get_centroids_cedar(np_image)
         print('%4d stars  %3d peak' % (len(centroids), pk))
         if len(centroids) < 20:
             expAuto = expAuto * 2
@@ -441,9 +485,9 @@ def getScopeAlt():
     try:
         x, y, z = angle.acceleration
         if z > 0:
-            return '-1'        # below horizon
+            return '-1'
         if x > 0:
-            return '99'        # past zenith
+            return '99'
         alt = -180 / math.pi * math.asin(z / 10)
         return '%2d' % alt
     except Exception:
@@ -469,7 +513,7 @@ def flipTestMode(mode):
     return '1'
 
 # ---------------------------------------------------------------------------
-# LX200 WiFi server  (SkySafari connects here on port 4060)
+# LX200 WiFi server
 # ---------------------------------------------------------------------------
 def serveWifi():
     global solved_radec, keep, frame
@@ -514,16 +558,10 @@ def serveWifi():
                         lon = x[3:].split('*')
                         Long = int(lon[0]) + int(lon[1]) / 60
                     elif cmd == 'SG':
-                        # SG is used by LX200 for UTC offset (':SG<+/-><hours>')
-                        # and also as an eFinder gain-adjust command (':SG<+/-1>').
-                        # Distinguish by length: LX200 form has a fractional hours
-                        # value (e.g. ':SG-5.0' = 7 chars); gain form is shorter.
                         if len(x) > 5:
-                            # LX200 UTC offset
                             client.send(b'1')
                             timeOffset = x[3:]
                         else:
-                            # eFinder gain adjust
                             client.send((':SG' + adjGain(float(x[3:5])) + '#').encode('ascii'))
                     elif cmd == 'SL':
                         client.send(b'1')
@@ -532,21 +570,21 @@ def serveWifi():
                         client.send(b'Updating Planetary Data#                              #')
                         print('dateSet', timeOffset, timeStr, x[3:])
                         coordinates.dateSet(timeOffset, timeStr, x[3:])
-                    elif cmd == 'RG':   # minimum exposure/gain
+                    elif cmd == 'RG':
                         selectExp(0.1, 10)
-                    elif cmd == 'RC':   # medium exposure/gain
+                    elif cmd == 'RC':
                         selectExp(0.1, 20)
-                    elif cmd == 'RM':   # high exposure/gain
+                    elif cmd == 'RM':
                         selectExp(0.2, 20)
-                    elif cmd == 'RS':   # very high exposure/gain
+                    elif cmd == 'RS':
                         selectExp(0.5, 30)
-                    elif cmd == 'Sr':   # target RA
+                    elif cmd == 'Sr':
                         raStr = x[3:]
                         client.send(b'1')
-                    elif cmd == 'Sd':   # target Dec
+                    elif cmd == 'Sd':
                         decStr = x[3:]
                         client.send(b'1')
-                    elif cmd == 'MS':   # goto (not implemented — acknowledge only)
+                    elif cmd == 'MS':
                         client.send(b'0')
                     elif cmd == 'Ms':
                         adjExp(-1)
@@ -558,7 +596,7 @@ def serveWifi():
                     elif cmd == 'Me':
                         print('Started saving images')
                         keep = True
-                    elif cmd == 'CM':   # measure offset
+                    elif cmd == 'CM':
                         client.send(b'0')
                         measure_offset()
                         ra  = raStr.split(':')
@@ -572,39 +610,35 @@ def serveWifi():
                     elif x and x[-1] == 'Q':
                         print('Stop saving images')
                         keep = False
-                    # ----------------------------------------------------------
-                    # Diagnostic / tuning commands available to any TCP client
-                    # on port 4060 — useful for setup and debugging.
-                    # ----------------------------------------------------------
-                    elif cmd == 'PS':   # on-demand plate solve
+                    elif cmd == 'PS':
                         client.send((':PS' + go_solve() + '#').encode('ascii'))
-                    elif cmd == 'OF':   # measure offset, return star name
+                    elif cmd == 'OF':
                         client.send((':OF' + measure_offset() + '#').encode('ascii'))
-                    elif cmd == 'GV':   # get version
+                    elif cmd == 'GV':
                         client.send((':GV' + version + '#').encode('ascii'))
-                    elif cmd == 'GO':   # get current offset string
+                    elif cmd == 'GO':
                         client.send((':GO' + offset_str + '#').encode('ascii'))
-                    elif cmd == 'SO':   # reset offset to image centre
+                    elif cmd == 'SO':
                         client.send((':SO' + reset_offset() + '#').encode('ascii'))
-                    elif cmd == 'GS':   # get star count from last solve
+                    elif cmd == 'GS':
                         client.send((':GS' + str(stars) + '#').encode('ascii'))
-                    elif cmd == 'GK':   # get peak pixel value from last solve
+                    elif cmd == 'GK':
                         client.send((':GK' + str(peak) + '#').encode('ascii'))
-                    elif cmd == 'Gt':   # get elapsed solve time
+                    elif cmd == 'Gt':
                         client.send((':Gt' + eTime + '#').encode('ascii'))
-                    elif cmd == 'SE':   # adjust exposure (+1 or -1 step)
+                    elif cmd == 'SE':
                         client.send((':SE' + adjExp(float(x[3:5])) + '#').encode('ascii'))
-                    elif cmd == 'SX':   # set absolute exposure value
+                    elif cmd == 'SX':
                         client.send((':SX' + setExp(x.strip('#')[3:]) + '#').encode('ascii'))
-                    elif cmd == 'GX':   # auto-expose
+                    elif cmd == 'GX':
                         client.send((':GX' + getAutoExp() + '#').encode('ascii'))
-                    elif cmd == 'GA':   # get scope altitude from accelerometer
+                    elif cmd == 'GA':
                         client.send((':GA' + getScopeAlt() + '#').encode('ascii'))
-                    elif cmd == 'IM':   # start/stop image saving
+                    elif cmd == 'IM':
                         client.send((':IM' + startImage(x.strip('#')[3:4]) + '#').encode('ascii'))
-                    elif cmd == 'TS':   # enable test mode
+                    elif cmd == 'TS':
                         client.send((':TS' + flipTestMode(True) + '#').encode('ascii'))
-                    elif cmd == 'TO':   # disable test mode
+                    elif cmd == 'TO':
                         client.send((':TO' + flipTestMode(False) + '#').encode('ascii'))
             print('SkySafari disconnected')
         except Exception as e:
@@ -623,6 +657,7 @@ def serveWifi():
 # Main
 # ---------------------------------------------------------------------------
 print('eFinder version', version)
+print('cedar-detect server expected at', CEDAR_DETECT_ADDR)
 print('Starting solve loop...')
 solveloop = Thread(target=loop_solve, daemon=True)
 solveloop.start()
@@ -635,13 +670,9 @@ time.sleep(0.5)
 
 print('eFinder running — waiting for SkySafari connection on port 4060')
 
-# Main thread: keep alive so daemon threads stay up.
-# Note: offset_flag is read/written from multiple threads without an explicit
-# lock. This is safe under CPython due to the GIL for simple boolean
-# reads/writes, but would require a threading.Event if ported to a
-# multi-interpreter or non-CPython environment.
 try:
     while True:
         time.sleep(60)
 except KeyboardInterrupt:
     print('eFinder stopped.')
+    _detect_channel.close()
