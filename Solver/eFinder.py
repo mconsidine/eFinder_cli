@@ -74,7 +74,7 @@ class Camera:
         self.picam2.start()
 
     def capture(self, test=False):
-        """Return Y-channel numpy array (760×960 uint8).
+        """Return Y-channel numpy array (760x960 uint8).
         If test=True and a test image exists on disk, use it instead of
         the live camera — useful for debugging over SSH without a sky view."""
         test_path = os.path.join(home_path, "Solver/test.npy")
@@ -106,7 +106,7 @@ class Coordinates:
     def dateSet(self, timeOffset, timeStr, dateStr):
         """Receive date/time from SkySafari, set system clock, refresh constants."""
         days = 0
-        sg   = float(timeOffset)          # hours to add to local time → UTC
+        sg   = float(timeOffset)          # hours to add to local time -> UTC
         hours, minutes, seconds = timeStr.split(':')
         hours = int(hours) + sg
         if hours >= 24:
@@ -127,7 +127,7 @@ class Coordinates:
         self._update_precession_constants()
 
     def precess(self, r, d):
-        """J2000 RA & Dec (decimal degrees) → JNow (decimal degrees)."""
+        """J2000 RA & Dec (decimal degrees) -> JNow (decimal degrees)."""
         dR = self.m + self.n1 * math.sin(math.radians(r)) * math.tan(math.radians(d))
         dD = self.n2 * math.cos(math.radians(r))
         r  = r + dR / 240 * self.t
@@ -135,20 +135,20 @@ class Coordinates:
         return r, d
 
     def hh2dms(self, dd):
-        """Decimal hours → 'HH:MM:SS' string (no sign, for LX200 RA)."""
+        """Decimal hours -> 'HH:MM:SS' string (no sign, for LX200 RA)."""
         minutes, seconds = divmod(abs(dd) * 3600, 60)
         degrees, minutes = divmod(minutes, 60)
         return '%02d:%02d:%02d' % (degrees, minutes, seconds)
 
     def dd2aligndms(self, dd):
-        """Decimal degrees → '±DD*MM:SS' string (LX200 Dec format)."""
+        """Decimal degrees -> '+/-DD*MM:SS' string (LX200 Dec format)."""
         sign             = '+' if dd >= 0 else '-'
         minutes, seconds = divmod(abs(dd) * 3600, 60)
         degrees, minutes = divmod(minutes, 60)
         return '%s%02d*%02d:%02d' % (sign, degrees, minutes, seconds)
 
     def dd2dms(self, dd):
-        """Decimal degrees → '±DD:MM:SS' string."""
+        """Decimal degrees -> '+/-DD:MM:SS' string."""
         sign             = '+' if dd >= 0 else '-'
         minutes, seconds = divmod(abs(dd) * 3600, 60)
         degrees, minutes = divmod(minutes, 60)
@@ -201,7 +201,7 @@ cam = (960, 760, 50.8, 13.5)
 camera = Camera()
 camera.set(float(param.get("Exposure", "0.1")), param.get("Gain", "10"))
 
-print('Loading Tetra3 database…')
+print('Loading Tetra3 database...')
 t3 = tetra3.Tetra3('t3_fov14_mag8')
 print('Tetra3 ready')
 
@@ -226,6 +226,8 @@ _ox, _oy = dxdy2pixel(
     float(param.get("d_x", "0")) / 60,
     float(param.get("d_y", "0")) / 60,
 )
+# Note: tetra3 target_pixel expects (row, col) i.e. (y, x).
+# dxdy2pixel returns (pix_x, pix_y) i.e. (col, row), so we swap deliberately.
 offset = (_oy, _ox)
 print('Offset:', offset)
 
@@ -245,10 +247,7 @@ def solveImage(img):
     start_time = time.time()
     print("Started solving")
 
-    # img is already uint8 from the camera — use directly, no copy needed
     np_image  = img if img.dtype == np.uint8 else img.astype(np.uint8)
-    # downsample=2 quarters the pixel count, ~4x faster centroid detection
-    # with negligible accuracy loss for the star sizes at this focal length
     centroids = tetra3.get_centroids_from_image(np_image, downsample=2)
     print('Centroids:', len(centroids), '  Peak:', np.max(np_image))
 
@@ -358,10 +357,13 @@ def setExp(a):
     return '1'
 
 def getAutoExp():
+    """Auto-expose: adjust until 20-50 centroids and peak not saturated.
+    Bounded to max_iter iterations to prevent infinite oscillation."""
     expAuto = float(param['Exposure'])
     camera.set(expAuto, param['Gain'])
     np_image = capture()
-    while True:
+    max_iter = 20
+    for _ in range(max_iter):
         pk        = np.max(np_image)
         centroids = tetra3.get_centroids_from_image(np_image, downsample=1)
         print('%4d stars  %3d peak' % (len(centroids), pk))
@@ -506,16 +508,23 @@ def serveWifi():
                     elif cmd == 'St':
                         client.send(b'1')
                         lat = x[3:].split('*')
-                        # Latitude as decimal degrees North +ve
                         Lat = int(lat[0]) + int(lat[1]) / 60
                     elif cmd == 'Sg':
                         client.send(b'1')
                         lon = x[3:].split('*')
-                        # Longitude as decimal degrees West +ve
                         Long = int(lon[0]) + int(lon[1]) / 60
                     elif cmd == 'SG':
-                        client.send(b'1')
-                        timeOffset = x[3:]
+                        # SG is used by LX200 for UTC offset (':SG<+/-><hours>')
+                        # and also as an eFinder gain-adjust command (':SG<+/-1>').
+                        # Distinguish by length: LX200 form has a fractional hours
+                        # value (e.g. ':SG-5.0' = 7 chars); gain form is shorter.
+                        if len(x) > 5:
+                            # LX200 UTC offset
+                            client.send(b'1')
+                            timeOffset = x[3:]
+                        else:
+                            # eFinder gain adjust
+                            client.send((':SG' + adjGain(float(x[3:5])) + '#').encode('ascii'))
                     elif cmd == 'SL':
                         client.send(b'1')
                         timeStr = x[3:]
@@ -564,9 +573,8 @@ def serveWifi():
                         print('Stop saving images')
                         keep = False
                     # ----------------------------------------------------------
-                    # Diagnostic / tuning commands (formerly Nexus-only).
-                    # These are not sent by SkySafari but are available to any
-                    # TCP client on port 4060 — useful for setup and debugging.
+                    # Diagnostic / tuning commands available to any TCP client
+                    # on port 4060 — useful for setup and debugging.
                     # ----------------------------------------------------------
                     elif cmd == 'PS':   # on-demand plate solve
                         client.send((':PS' + go_solve() + '#').encode('ascii'))
@@ -586,15 +594,6 @@ def serveWifi():
                         client.send((':Gt' + eTime + '#').encode('ascii'))
                     elif cmd == 'SE':   # adjust exposure (+1 or -1 step)
                         client.send((':SE' + adjExp(float(x[3:5])) + '#').encode('ascii'))
-                    elif cmd == 'SG':   # adjust gain (+1 or -1 step)
-                        # Note: SG is also used by LX200 for UTC offset — that
-                        # variant arrives as ':SG<offset>' with a sign character
-                        # at position 3, so distinguish by content length.
-                        if len(x) <= 5:
-                            client.send((':SG' + adjGain(float(x[3:5])) + '#').encode('ascii'))
-                        else:
-                            # LX200 UTC offset form — already handled above as 'SG'
-                            pass
                     elif cmd == 'SX':   # set absolute exposure value
                         client.send((':SX' + setExp(x.strip('#')[3:]) + '#').encode('ascii'))
                     elif cmd == 'GX':   # auto-expose
@@ -610,7 +609,7 @@ def serveWifi():
             print('SkySafari disconnected')
         except Exception as e:
             print('WiFi server error:', e)
-            print('Restarting WiFi server socket…')
+            print('Restarting WiFi server socket...')
             try:
                 s.close()
             except Exception:
@@ -624,19 +623,23 @@ def serveWifi():
 # Main
 # ---------------------------------------------------------------------------
 print('eFinder version', version)
-print('Starting solve loop…')
+print('Starting solve loop...')
 solveloop = Thread(target=loop_solve, daemon=True)
 solveloop.start()
 time.sleep(0.5)
 
-print('Starting WiFi/LX200 server…')
+print('Starting WiFi/LX200 server...')
 wifiloop = Thread(target=serveWifi, daemon=True)
 wifiloop.start()
 time.sleep(0.5)
 
 print('eFinder running — waiting for SkySafari connection on port 4060')
 
-# Main thread: nothing left to do — keep alive so daemon threads stay up
+# Main thread: keep alive so daemon threads stay up.
+# Note: offset_flag is read/written from multiple threads without an explicit
+# lock. This is safe under CPython due to the GIL for simple boolean
+# reads/writes, but would require a threading.Event if ported to a
+# multi-interpreter or non-CPython environment.
 try:
     while True:
         time.sleep(60)
