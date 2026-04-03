@@ -25,7 +25,8 @@ jobs:
       # parted/e2fsprogs: image partitioning
       # qemu-user-static/binfmt-support: aarch64 chroot
       # gcc-aarch64-linux-gnu: cross-linker for cedar-detect (pulls in build-essential)
-      # python3-pip: grpcio-tools for stub generation on the host
+      # protobuf-compiler: required by the cedar-detect Rust build (prost-build)
+      # python3-pip: grpcio-tools for Python stub generation on the host
       - name: Install host tools
         run: |
           sudo apt-get update -q
@@ -33,6 +34,7 @@ jobs:
             parted e2fsprogs \
             qemu-user-static binfmt-support \
             gcc-aarch64-linux-gnu \
+            protobuf-compiler \
             python3-pip
 
       - name: Register QEMU binfmt handlers
