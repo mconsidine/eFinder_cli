@@ -150,8 +150,9 @@ jobs:
       # -----------------------------------------------------------------------
       - name: Write config.env
         run: |
+          sudo mkdir -p /mnt/pi/home/efinder
           printf 'WIFI_PASS="12345678"\nSAMBA_PASS="12345678"\n' > config.env
-          sudo install -m 600 config.env /mnt/pi/home/efinder/config.env
+          sudo install -m 600 -o 1000 -g 1000 config.env /mnt/pi/home/efinder/config.env
 
       # -----------------------------------------------------------------------
       # Stage all repo files into the image before the chroot runs,
