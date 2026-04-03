@@ -11,6 +11,11 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v6
 
+      - name: Fix hostname resolution
+        run: |
+          sudo hostnamectl set-hostname "runner-host"
+          echo "127.0.0.1 runner-host" | sudo tee -a /etc/hosts
+          
       - name: Free up runner disk space
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android \
@@ -41,12 +46,7 @@ jobs:
       # Cross-compile cedar-detect-server for aarch64 using cross-rs.
       # Done early so the binary is ready for the chroot install step.
       # -----------------------------------------------------------------------
-      ##- name: Install protoc (host + cross)
-      ##  run: |
-      ##    sudo apt-get update -q
-      ##    sudo apt-get install -y protobuf-compiler
-      ##    protoc --version
-          
+
       - name: Install Rust toolchain + aarch64 cross toolchain
         run: |
           sudo apt-get update -q
@@ -220,7 +220,11 @@ jobs:
       - name: Install everything inside chroot
         run: |
           CHROOT="sudo chroot /mnt/pi"
-
+          
+          # Copy DNS settings from runner to image
+          sudo cp /etc/resolv.conf /mnt/pi/etc/resolv.conf
+          
+          CHROOT="sudo chroot /mnt/pi"
           # ------------------------------------------------------------------
           # Bind-mount pseudo-filesystems needed by apt and systemctl.
           # ------------------------------------------------------------------
@@ -266,6 +270,7 @@ jobs:
           # ------------------------------------------------------------------
           # Python virtual environment
           # ------------------------------------------------------------------
+          $CHROOT chown efinder:efinder /home/efinder
           $CHROOT sudo -u efinder python3 -m venv \
             /home/efinder/venv-efinder --system-site-packages
           $CHROOT /home/efinder/venv-efinder/bin/pip install --upgrade pip
@@ -560,16 +565,17 @@ jobs:
       # -----------------------------------------------------------------------
       # Unmount everything cleanly.
       # -----------------------------------------------------------------------
+
       - name: Unmount image
         if: always()
         run: |
-          sudo umount /mnt/pi/dev/pts  || true
-          sudo umount /mnt/pi/dev      || true
-          sudo umount /mnt/pi/sys      || true
-          sudo umount /mnt/pi/proc     || true
-          sudo umount /mnt/pi/boot/firmware || true
-          sudo umount /mnt/pi          || true
-          sudo losetup -d "$LOOP"      || true
+          sudo umount -l /mnt/pi/dev/pts || true
+          sudo umount -l /mnt/pi/dev     || true
+          sudo umount -l /mnt/pi/sys     || true
+          sudo umount -l /mnt/pi/proc    || true
+          sudo umount -l /mnt/pi/boot/firmware || true
+          sudo umount -l /mnt/pi         || true
+          sudo losetup -D                || true
 
       - name: Compress final image
         run: |
