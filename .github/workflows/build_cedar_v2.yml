@@ -105,9 +105,18 @@ jobs:
       # (unindented lines break YAML block scalars).
       # To regenerate the base64: base64 -w0 generate_database.py
       # -----------------------------------------------------------------------
-      - name: Write database generation script
+      #- name: Write database generation script
+      #  run: |
+      #    echo aW1wb3J0IG9zLCBzeXMKaG9tZSA9ICcvaG9tZS9lZmluZGVyJwpzeXMucGF0aC5pbnNlcnQoMCwgb3MucGF0aC5qb2luKGhvbWUsICdTb2x2ZXInKSkKaW1wb3J0IHRldHJhMwpkYl9wYXRoID0gb3MucGF0aC5qb2luKGhvbWUsICdTb2x2ZXInLCAnY2VkYXJfZGF0YWJhc2UnKQp0MyA9IHRldHJhMy5UZXRyYTMobG9hZF9kYXRhYmFzZT1Ob25lKQp0My5nZW5lcmF0ZV9kYXRhYmFzZSgKICAgIG1heF9mb3Y9MTUsCiAgICBtaW5fZm92PTEyLAogICAgc2F2ZV9hcz1kYl9wYXRoLAogICAgc3Rhcl9jYXRhbG9nPSdoaXBfbWFpbicsCiAgICBzdGFyX21heF9tYWduaXR1ZGU9OC4wLAogICAgcGF0dGVybl9zdGFyc19wZXJfZm92PTEwLAogICAgY2F0YWxvZ19zdGFyc19wZXJfZm92PTIwLAopCnByaW50KCdEYXRhYmFzZSBzYXZlZCB0bycsIGRiX3BhdGggKyAnLm5weicpCg== | base64 -d > generate_database.py
+      #    echo "--- generate_database.py ---"
+      #    cat generate_database.py
+      - name: Stage database generation script from cedar-solve
         run: |
-          echo aW1wb3J0IG9zLCBzeXMKaG9tZSA9ICcvaG9tZS9lZmluZGVyJwpzeXMucGF0aC5pbnNlcnQoMCwgb3MucGF0aC5qb2luKGhvbWUsICdTb2x2ZXInKSkKaW1wb3J0IHRldHJhMwpkYl9wYXRoID0gb3MucGF0aC5qb2luKGhvbWUsICdTb2x2ZXInLCAnY2VkYXJfZGF0YWJhc2UnKQp0MyA9IHRldHJhMy5UZXRyYTMobG9hZF9kYXRhYmFzZT1Ob25lKQp0My5nZW5lcmF0ZV9kYXRhYmFzZSgKICAgIG1heF9mb3Y9MTUsCiAgICBtaW5fZm92PTEyLAogICAgc2F2ZV9hcz1kYl9wYXRoLAogICAgc3Rhcl9jYXRhbG9nPSdoaXBfbWFpbicsCiAgICBzdGFyX21heF9tYWduaXR1ZGU9OC4wLAogICAgcGF0dGVybl9zdGFyc19wZXJfZm92PTEwLAogICAgY2F0YWxvZ19zdGFyc19wZXJfZm92PTIwLAopCnByaW50KCdEYXRhYmFzZSBzYXZlZCB0bycsIGRiX3BhdGggKyAnLm5weicpCg== | base64 -d > generate_database.py
+          # Clone cedar-solve to get the CLI tools
+          git clone https://github.com/smroid/cedar-solve.git
+          cp cedar-solve/tetra3/cli/generate_database.py generate_database.py
+          # Modify it to use the correct output path if needed
+          sed -i "s|'tetra3_database'|'/home/efinder/Solver/cedar_database'|g" generate_database.py
           echo "--- generate_database.py ---"
           cat generate_database.py
 
