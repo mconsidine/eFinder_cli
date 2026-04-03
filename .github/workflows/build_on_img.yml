@@ -30,90 +30,33 @@ jobs:
 
       - name: Write config.env
         run: |
-          cat > config.env <<'EOF'
-          WIFI_PASS="12345678"
-          SAMBA_PASS="12345678"
-          EOF
+          printf 'WIFI_PASS="12345678"\nSAMBA_PASS="12345678"\n' > config.env
 
-      - name: Write firstrun.sh
+      - name: Write firstrun.sh and firstrun.service
         run: |
-          cat > firstrun.sh <<'FSH'
-          #!/bin/bash
-          set -e
-          LOG=/home/efinder/firstrun.log
-          exec > >(tee -a "$LOG") 2>&1
-
-          echo "=== eFinder first-boot setup: $(date) ==="
-
-          # Fix ownership now that efinder user exists
-          chown -R efinder:efinder /home/efinder
-
-          # Load baked-in credentials
-          source /home/efinder/config.env
-          export WIFI_PASS SAMBA_PASS
-
-          # Clone repo to get latest install.sh and app files
-          cd /home/efinder
-          git clone https://github.com/mconsidine/eFinder_cli.git efinder-repo
-
-          # Run installer non-interactively
-          bash /home/efinder/efinder-repo/install.sh --non-interactive
-
-          # Remove trigger file — skips on all subsequent boots
-          # To re-run manually: touch /home/efinder/.run_firstrun && sudo reboot
-          rm -f /home/efinder/.run_firstrun
-
-          echo "=== eFinder first-boot setup complete: $(date) ==="
-          reboot
-          FSH
+          echo IyEvYmluL2Jhc2gKc2V0IC1lCkxPRz0vaG9tZS9lZmluZGVyL2ZpcnN0cnVuLmxvZwpleGVjID4gPih0ZWUgLWEgIiRMT0ciKSAyPiYxCgplY2hvICI9PT0gZUZpbmRlciBmaXJzdC1ib290IHNldHVwOiAkKGRhdGUpID09PSIKCiMgV2FpdCBmb3IgaW50ZXJuZXQgYmVmb3JlIGF0dGVtcHRpbmcgZ2l0IGNsb25lCmVjaG8gIldhaXRpbmcgZm9yIGludGVybmV0IGNvbm5lY3Rpdml0eS4uLiIKY29ubmVjdGVkPWZhbHNlCmZvciBpIGluICQoc2VxIDEgMzApOyBkbwogICAgaWYgcGluZyAtYzEgLVcyIGdpdGh1Yi5jb20gJj4vZGV2L251bGw7IHRoZW4KICAgICAgICBjb25uZWN0ZWQ9dHJ1ZQogICAgICAgIGVjaG8gIiAgSW50ZXJuZXQgcmVhY2hhYmxlIGFmdGVyIGF0dGVtcHQgJGkiCiAgICAgICAgYnJlYWsKICAgIGZpCiAgICBlY2hvICIgIGF0dGVtcHQgJGkvMzAgLS0gcmV0cnlpbmcgaW4gMTBzLi4uIgogICAgc2xlZXAgMTAKZG9uZQoKaWYgWyAiJGNvbm5lY3RlZCIgIT0gInRydWUiIF07IHRoZW4KICAgIGVjaG8gIkVSUk9SOiBObyBpbnRlcm5ldCBhZnRlciA1IG1pbnV0ZXMgLS0gYWJvcnRpbmcgZmlyc3QtYm9vdCBzZXR1cC4iCiAgICBlY2hvICIgICAgICAgRW5zdXJlIHRoZSBQaSBoYXMgV2lGaSBvciBVU0IgZXRoZXJuZXQgb24gZmlyc3QgYm9vdC4iCiAgICBleGl0IDEKZmkKCiMgRml4IG93bmVyc2hpcCBub3cgdGhhdCB0aGUgZWZpbmRlciB1c2VyIGV4aXN0cyBhdCBydW50aW1lCmNob3duIC1SIGVmaW5kZXI6ZWZpbmRlciAvaG9tZS9lZmluZGVyCgojIExvYWQgYmFrZWQtaW4gY3JlZGVudGlhbHMgZnJvbSBjb25maWcuZW52CnNvdXJjZSAvaG9tZS9lZmluZGVyL2NvbmZpZy5lbnYKZXhwb3J0IFdJRklfUEFTUyBTQU1CQV9QQVNTCgojIENsb25lIHRoZSByZXBvIHRvIGdldCB0aGUgbGF0ZXN0IGluc3RhbGwuc2ggYW5kIFNvbHZlciBmaWxlcwpjZCAvaG9tZS9lZmluZGVyCmlmIFsgLWQgZWZpbmRlci1yZXBvIF07IHRoZW4KICAgIGVjaG8gIlJlcG8gYWxyZWFkeSBwcmVzZW50IC0tIHB1bGxpbmcgbGF0ZXN0Li4uIgogICAgZ2l0IC1DIGVmaW5kZXItcmVwbyBwdWxsIG9yaWdpbgplbHNlCiAgICBnaXQgY2xvbmUgaHR0cHM6Ly9naXRodWIuY29tL21jb25zaWRpbmUvZUZpbmRlcl9jbGkuZ2l0IGVmaW5kZXItcmVwbwpmaQoKIyBFbnN1cmUgcmVwbyBmaWxlcyBhcmUgb3duZWQgYnkgZWZpbmRlciwgbm90IHJvb3QKY2hvd24gLVIgZWZpbmRlcjplZmluZGVyIC9ob21lL2VmaW5kZXIvZWZpbmRlci1yZXBvCgojIFJ1biBpbnN0YWxsZXIgbm9uLWludGVyYWN0aXZlbHkKYmFzaCAvaG9tZS9lZmluZGVyL2VmaW5kZXItcmVwby9pbnN0YWxsLnNoIC0tbm9uLWludGVyYWN0aXZlCgojIFJlbW92ZSB0cmlnZ2VyIGZpbGUgLS0gZmlyc3RydW4uc2VydmljZSBza2lwcyBvbiBhbGwgc3Vic2VxdWVudCBib290cy4KIyBUbyByZS1ydW46IHRvdWNoIC9ob21lL2VmaW5kZXIvLnJ1bl9maXJzdHJ1biAmJiBzdWRvIHJlYm9vdApybSAtZiAvaG9tZS9lZmluZGVyLy5ydW5fZmlyc3RydW4KCmVjaG8gIj09PSBlRmluZGVyIGZpcnN0LWJvb3Qgc2V0dXAgY29tcGxldGU6ICQoZGF0ZSkgPT09IgpyZWJvb3QK | base64 -d > firstrun.sh
           chmod +x firstrun.sh
-
-      - name: Write firstrun.service
-        run: |
-          cat > firstrun.service <<'SVC'
-          [Unit]
-          Description=eFinder first-boot setup
-          After=network-online.target
-          Wants=network-online.target
-          ConditionPathExists=/home/efinder/.run_firstrun
-
-          [Service]
-          Type=oneshot
-          ExecStart=/usr/local/bin/firstrun.sh
-          RemainAfterExit=yes
-          StandardOutput=journal+console
-          StandardError=journal+console
-          TimeoutStartSec=1800
-
-          [Install]
-          WantedBy=multi-user.target
-          SVC
+          echo W1VuaXRdCkRlc2NyaXB0aW9uPWVGaW5kZXIgZmlyc3QtYm9vdCBzZXR1cApBZnRlcj1uZXR3b3JrLW9ubGluZS50YXJnZXQKV2FudHM9bmV0d29yay1vbmxpbmUudGFyZ2V0CkNvbmRpdGlvblBhdGhFeGlzdHM9L2hvbWUvZWZpbmRlci8ucnVuX2ZpcnN0cnVuCgpbU2VydmljZV0KVHlwZT1vbmVzaG90CkV4ZWNTdGFydD0vdXNyL2xvY2FsL2Jpbi9maXJzdHJ1bi5zaApSZW1haW5BZnRlckV4aXQ9eWVzClN0YW5kYXJkT3V0cHV0PWpvdXJuYWwrY29uc29sZQpTdGFuZGFyZEVycm9yPWpvdXJuYWwrY29uc29sZQpUaW1lb3V0U3RhcnRTZWM9MTgwMAoKW0luc3RhbGxdCldhbnRlZEJ5PW11bHRpLXVzZXIudGFyZ2V0Cg== | base64 -d > firstrun.service
 
       - name: Mount and customize image
         run: |
           IMAGE=2025-11-24-raspios-bookworm-arm64-lite.img
 
-          # Extend image by 256MB to make room for our files
           truncate -s +256M $IMAGE
 
-          # Set up loop device
           LOOP=$(sudo losetup -fP --show $IMAGE)
           echo "Loop device: $LOOP"
 
-          # Resize root partition and filesystem to fill new space
           sudo parted -s $LOOP resizepart 2 100%
           sudo e2fsck -fy ${LOOP}p2 || true
           sudo resize2fs ${LOOP}p2
 
-          # Mount root and boot partitions
           sudo mkdir -p /mnt/pi/boot/firmware
           sudo mount ${LOOP}p2 /mnt/pi
           sudo mount ${LOOP}p1 /mnt/pi/boot/firmware
 
-          # Create efinder directory structure
           sudo mkdir -p /mnt/pi/home/efinder/Solver
 
-          # Copy app files into image
           sudo install -m 755 install.sh \
               /mnt/pi/home/efinder/install.sh
           sudo install -m 755 Solver/eFinder.py \
@@ -127,30 +70,24 @@ jobs:
           sudo install -m 644 Solver/eFinder.config \
               /mnt/pi/home/efinder/Solver/eFinder.config
 
-          # Copy credentials — mode 600 so only efinder can read it
           sudo install -m 600 config.env \
               /mnt/pi/home/efinder/config.env
 
-          # Install firstrun script and service
           sudo install -m 755 firstrun.sh \
               /mnt/pi/usr/local/bin/firstrun.sh
           sudo install -m 644 firstrun.service \
               /mnt/pi/etc/systemd/system/firstrun.service
 
-          # Enable SSH by creating the flag file on the boot partition
           sudo touch /mnt/pi/boot/firmware/ssh
 
-          # Enable firstrun.service via symlink — no systemctl needed
           sudo mkdir -p \
               /mnt/pi/etc/systemd/system/multi-user.target.wants
           sudo ln -sf \
               /etc/systemd/system/firstrun.service \
               /mnt/pi/etc/systemd/system/multi-user.target.wants/firstrun.service
 
-          # Create the trigger file that firstrun.service checks for
           sudo touch /mnt/pi/home/efinder/.run_firstrun
 
-          # Unmount cleanly
           sudo umount /mnt/pi/boot/firmware
           sudo umount /mnt/pi
           sudo losetup -d $LOOP
