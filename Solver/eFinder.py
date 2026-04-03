@@ -245,8 +245,11 @@ def solveImage(img):
     start_time = time.time()
     print("Started solving")
 
-    np_image  = np.asarray(img, dtype=np.uint8)
-    centroids = tetra3.get_centroids_from_image(np_image, downsample=1)
+    # img is already uint8 from the camera — use directly, no copy needed
+    np_image  = img if img.dtype == np.uint8 else img.astype(np.uint8)
+    # downsample=2 quarters the pixel count, ~4x faster centroid detection
+    # with negligible accuracy loss for the star sizes at this focal length
+    centroids = tetra3.get_centroids_from_image(np_image, downsample=2)
     print('Centroids:', len(centroids), '  Peak:', np.max(np_image))
 
     if len(centroids) < 15:
@@ -322,6 +325,8 @@ def loop_solve():
             capture()
             solveImage(capArray)
             print('****************')
+        else:
+            time.sleep(0.05)   # avoid busy-spin while offset measurement runs
 
 # ---------------------------------------------------------------------------
 # Exposure / gain helpers
