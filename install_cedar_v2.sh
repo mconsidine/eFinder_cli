@@ -21,9 +21,9 @@
 # Usage (triggered by firstrun.service on first boot, never run directly):
 #   /bin/bash /home/efinder/install_cedar_v2.sh
 #
-# WIFI_PASS and SAMBA_PASS are sourced directly from /home/efinder/config.env
-# at the top of this script. The calling service does not need to pre-export
-# them; the script is self-contained.
+# WIFI_PASS and SAMBA_PASS must already be in the environment, sourced from
+# /home/efinder/config.env by the calling service's EnvironmentFile= or by
+# firstrun.service's ExecStartPre.
 # =============================================================================
 set -eo pipefail
 
@@ -80,8 +80,7 @@ nmcli connection reload
 
 nmcli connection modify "efinder-ap" ssid "$SSID"
 nmcli connection modify "efinder-ap" wifi-sec.psk "$WIFI_PASS"
-nmcli connection up "efinder-ap" || \
-    echo "WARNING: nmcli connection up efinder-ap failed — AP may not start until reboot."
+nmcli connection up "efinder-ap" || true
 
 echo "  AP profile updated to SSID '$SSID'."
 
