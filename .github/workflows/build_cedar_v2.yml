@@ -107,7 +107,7 @@ jobs:
       # -----------------------------------------------------------------------
       - name: Write database generation script
         run: |
-          echo aW1wb3J0IG9zLCBzeXMKaG9tZSA9ICcvaG9tZS9lZmluZGVyJwpzeXMucGF0aC5pbnNlcnQoMCwgb3MucGF0aC5qb2luKGhvbWUsICdTb2x2ZXInKSkKaW1wb3J0IHRldHJhMwpkYl9wYXRoID0gb3MucGF0aC5qb2luKGhvbWUsICdTb2x2ZXInLCAnY2VkYXJfZGF0YWJhc2UnKQp0MyA9IHRldHJhMy5UZXRyYTMobG9hZF9kYXRhYmFzZT1Ob25lKQp0My5nZW5lcmF0ZV9kYXRhYmFzZSgKICAgIG1heF9mb3Y9MTUsCiAgICBtaW5fZm92PTEyLAogICAgc2F2ZV9hcz1kYl9wYXRoLAogICAgc3Rhcl9jYXRhbG9nPSdoaXBfbWFpbicsCiAgICBtYXhfbWFnbml0dWRlPTguMCwKICAgIHBhdHRlcm5fc3RhcnNfcGVyX2Zvdj0xMCwKICAgIGNhdGFsb2dfc3RhcnNfcGVyX2Zvdj0yMCwKKQpwcmludCgnRGF0YWJhc2Ugc2F2ZWQgdG8nLCBkYl9wYXRoICsgJy5ucHonKQo= | base64 -d > generate_database.py
+          echo aW1wb3J0IG9zLCBzeXMKaG9tZSA9ICcvaG9tZS9lZmluZGVyJwpzeXMucGF0aC5pbnNlcnQoMCwgb3MucGF0aC5qb2luKGhvbWUsICdTb2x2ZXInKSkKaW1wb3J0IHRldHJhMwpkYl9wYXRoID0gb3MucGF0aC5qb2luKGhvbWUsICdTb2x2ZXInLCAnY2VkYXJfZGF0YWJhc2UnKQp0MyA9IHRldHJhMy5UZXRyYTMobG9hZF9kYXRhYmFzZT1Ob25lKQp0My5nZW5lcmF0ZV9kYXRhYmFzZSgKICAgIG1heF9mb3Y9MTUsCiAgICBtaW5fZm92PTEyLAogICAgc2F2ZV9hcz1kYl9wYXRoLAogICAgc3Rhcl9jYXRhbG9nPSdoaXBfbWFpbicsCiAgICBzdGFyX21heF9tYWduaXR1ZGU9OC4wLAogICAgcGF0dGVybl9zdGFyc19wZXJfZm92PTEwLAogICAgY2F0YWxvZ19zdGFyc19wZXJfZm92PTIwLAopCnByaW50KCdEYXRhYmFzZSBzYXZlZCB0bycsIGRiX3BhdGggKyAnLm5weicpCg== | base64 -d > generate_database.py
           echo "--- generate_database.py ---"
           cat generate_database.py
 
@@ -255,13 +255,7 @@ jobs:
             apache2 \
             php8.2 \
             libapache2-mod-php8.2 \
-            unzip \
-            libjpeg-dev \
-            zlib1g-dev \
-            libtiff-dev \
-            libfreetype-dev \
-            liblcms2-dev \
-            libwebp-dev
+            unzip
 
           # ------------------------------------------------------------------
           # Python virtual environment.
@@ -286,23 +280,8 @@ jobs:
             sudo tee /mnt/pi/home/efinder/venv-efinder/pip/pip.conf > /dev/null
 
           $CHROOT /home/efinder/venv-efinder/bin/pip install --upgrade pip
-          # Install Pillow explicitly before cedar-solve so pip's resolver
-          # sees it already satisfied and does not attempt a source build.
-          # cedar-solve -> tetra3 -> Pillow, and PyPI has no pre-built aarch64
-          # wheel for Pillow, so without this pip tries to compile from source
-          # and fails unless libjpeg-dev etc. are present (added above).
-          # Passing --prefer-binary ensures pip uses a wheel if one exists and
-          # only falls back to source as a last resort.
           $CHROOT /home/efinder/venv-efinder/bin/pip install \
-            --prefer-binary \
-            Pillow
-
-          # adafruit-circuitpython-adxl34x is intentionally not installed here.
-          # The accelerometer is disabled by default (USE_ACCELEROMETER = False
-          # in eFinder_cedar_v2.py). If you fit an ADXL343/345 and set that flag
-          # to True, install it manually on the Pi inside the venv:
-          #   /home/efinder/venv-efinder/bin/pip install adafruit-circuitpython-adxl34x
-          $CHROOT /home/efinder/venv-efinder/bin/pip install \
+            adafruit-circuitpython-adxl34x \
             grpcio \
             cedar-solve
 
