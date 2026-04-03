@@ -245,6 +245,7 @@ jobs:
           $CHROOT apt-get update -q
           $CHROOT apt-get upgrade -y
           $CHROOT apt-get install -y \
+            ca-certificates \
             python3-pil \
             python3-smbus \
             python3-picamera2 \
@@ -266,8 +267,15 @@ jobs:
           $CHROOT chown efinder:efinder /home/efinder
           $CHROOT su -s /bin/bash efinder -c \
             "python3 -m venv /home/efinder/venv-efinder --system-site-packages"
-          $CHROOT /home/efinder/venv-efinder/bin/pip install --upgrade pip
+          # pip: skip piwheels.org — its TLS handshake fails inside the
+          # QEMU chroot (missing cert bundle) and its aarch64 wheels
+          # cannot be used under QEMU on x86_64 anyway. On a real Pi
+          # the system pip.conf re-adds piwheels automatically.
           $CHROOT /home/efinder/venv-efinder/bin/pip install \
+            --index-url https://pypi.org/simple \
+            --upgrade pip
+          $CHROOT /home/efinder/venv-efinder/bin/pip install \
+            --index-url https://pypi.org/simple \
             adafruit-circuitpython-adxl34x \
             grpcio \
             cedar-solve
