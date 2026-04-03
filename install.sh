@@ -14,22 +14,6 @@ VENV="$EFINDER_HOME/venv-efinder"
 INSTALL_MARKER="$EFINDER_HOME/.efinder_installed"
 
 # ---------------------------------------------------------------------------
-# Credentials — loaded from config.env if running non-interactively
-# ---------------------------------------------------------------------------
-if [[ "$1" == "--non-interactive" ]]; then
-    source /home/efinder/config.env
-else
-    read -rp  "WiFi Password: " WIFI_PASS
-    read -rsp "Samba Password: " SAMBA_PASS; echo
-fi
-
-# Generate SSID from this Pi's serial number — always done locally
-SERIAL=$(grep Serial /proc/cpuinfo | tail -c 5 | tr -d '\n')
-WIFI_SSID="eFinder-${SERIAL}"
-
-echo "WiFi SSID will be: $WIFI_SSID"
-
-# ---------------------------------------------------------------------------
 # Guard: must be run as the efinder user (with sudo), not as root directly.
 # File ownership inside $EFINDER_HOME will be wrong if run as root.
 # ---------------------------------------------------------------------------
@@ -355,6 +339,28 @@ sudo raspi-config nonint do_serial_cons 1  # disable serial console (keep port f
 # Reduce swap activity (images are in RAM; avoid wearing SD card)
 grep -q "vm.swappiness" /etc/sysctl.conf || \
     echo 'vm.swappiness = 0' | sudo tee -a /etc/sysctl.conf > /dev/null
+
+# Set CPU governor to performance mode — keeps all 4 cores at full clock.
+# The Pi Zero 2W defaults to ondemand which throttles under light load,
+# hurting centroid detection and plate solving latency.
+# Implemented as a oneshot systemd service so it survives reboots cleanly.
+sudo tee /etc/systemd/system/cpu-performance.service > /dev/null <<'EOF'
+[Unit]
+Description=Set CPU governor to performance mode
+After=sysinit.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'echo performance | tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor'
+StandardOutput=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+sudo systemctl daemon-reload
+sudo systemctl enable --now cpu-performance.service
+echo "  CPU governor set to performance mode."
 
 # Allow the efinder app to set the system clock (needed for SkySafari time sync).
 # Scoped to 'date' only — no broader sudo access granted.
