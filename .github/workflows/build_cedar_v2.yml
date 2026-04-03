@@ -255,7 +255,13 @@ jobs:
             apache2 \
             php8.2 \
             libapache2-mod-php8.2 \
-            unzip
+            unzip \
+            libjpeg-dev \
+            zlib1g-dev \
+            libtiff-dev \
+            libfreetype-dev \
+            liblcms2-dev \
+            libwebp-dev
 
           # ------------------------------------------------------------------
           # Python virtual environment.
@@ -267,18 +273,42 @@ jobs:
           $CHROOT chown efinder:efinder /home/efinder
           $CHROOT su -s /bin/bash efinder -c \
             "python3 -m venv /home/efinder/venv-efinder --system-site-packages"
-          # pip: skip piwheels.org — its TLS handshake fails inside the
-          # QEMU chroot (missing cert bundle) and its aarch64 wheels
-          # cannot be used under QEMU on x86_64 anyway. On a real Pi
-          # the system pip.conf re-adds piwheels automatically.
+          # pip: the Pi OS image ships /etc/pip.conf with piwheels as an
+          # extra-index-url. Inside the QEMU chroot the piwheels TLS
+          # handshake fails (cert bundle not yet fully initialised) and
+          # aarch64 wheels from piwheels can't be used under x86_64 QEMU
+          # anyway.  Override pip.conf for the duration of the build by
+          # writing a venv-local pip.conf that suppresses the extra index.
+          # The system /etc/pip.conf is left untouched so piwheels still
+          # works normally on a real Pi at runtime.
+          sudo mkdir -p /mnt/pi/home/efinder/venv-efinder/pip
+          printf '[global]\nindex-url = https://pypi.org/simple\nno-extra-index = true\n' | \
+            sudo tee /mnt/pi/home/efinder/venv-efinder/pip/pip.conf > /dev/null
+
+          $CHROOT /home/efinder/venv-efinder/bin/pip install --upgrade pip
+          # Install Pillow explicitly before cedar-solve so pip's resolver
+          # sees it already satisfied and does not attempt a source build.
+          # cedar-solve -> tetra3 -> Pillow, and PyPI has no pre-built aarch64
+          # wheel for Pillow, so without this pip tries to compile from source
+          # and fails unless libjpeg-dev etc. are present (added above).
+          # Passing --prefer-binary ensures pip uses a wheel if one exists and
+          # only falls back to source as a last resort.
           $CHROOT /home/efinder/venv-efinder/bin/pip install \
-            --index-url https://pypi.org/simple \
-            --upgrade pip
+            --prefer-binary \
+            Pillow
+
+          # adafruit-circuitpython-adxl34x is intentionally not installed here.
+          # The accelerometer is disabled by default (USE_ACCELEROMETER = False
+          # in eFinder_cedar_v2.py). If you fit an ADXL343/345 and set that flag
+          # to True, install it manually on the Pi inside the venv:
+          #   /home/efinder/venv-efinder/bin/pip install adafruit-circuitpython-adxl34x
           $CHROOT /home/efinder/venv-efinder/bin/pip install \
-            --index-url https://pypi.org/simple \
-            adafruit-circuitpython-adxl34x \
             grpcio \
             cedar-solve
+
+          # Remove the build-time pip.conf override so the venv behaves
+          # normally on the Pi (falling back to system /etc/pip.conf).
+          sudo rm -f /mnt/pi/home/efinder/venv-efinder/pip/pip.conf
 
           # ------------------------------------------------------------------
           # Generate the cedar-solve star database inside the chroot (QEMU).
