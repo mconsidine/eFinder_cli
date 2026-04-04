@@ -211,19 +211,10 @@ cam = (960, 760, 50.8, 13.5)
 
 # ---------------------------------------------------------------------------
 # Camera and Tetra3 initialisation
+# Load database first — it takes minutes with a large file.
+# Initialising the camera before the database load causes the V4L2 driver
+# to time out waiting for captures that never come during the load period.
 # ---------------------------------------------------------------------------
-try:
-    camera = Camera()
-    camera.set(float(param.get("Exposure", "0.1")), param.get("Gain", "10"))
-    cameraReady = True
-    print('Camera ready')
-except Exception as e:
-    print('ERROR: Camera initialisation failed:', e)
-    print('       Check camera cable and dtoverlay=imx477 in /boot/firmware/config.txt')
-    print('       Solve loop will not run without a camera.')
-    camera = None
-    cameraReady = False
-
 print('Loading Tetra3 database…')
 try:
     t3 = tetra3.Tetra3('t3_fov14_mag8')
@@ -238,6 +229,18 @@ except Exception as e:
     print('ERROR: Tetra3 database load failed:', e)
     t3 = None
     databaseReady = False
+
+try:
+    camera = Camera()
+    camera.set(float(param.get("Exposure", "0.1")), param.get("Gain", "10"))
+    cameraReady = True
+    print('Camera ready')
+except Exception as e:
+    print('ERROR: Camera initialisation failed:', e)
+    print('       Check camera cable and dtoverlay=imx477 in /boot/firmware/config.txt')
+    print('       Solve loop will not run without a camera.')
+    camera = None
+    cameraReady = False
 
 # Restore saved offset
 pix_x, pix_y = (

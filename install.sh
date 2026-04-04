@@ -121,7 +121,6 @@ fi
 
 if [ "$HAVE_INTERNET" = true ]; then
     "$VENV/bin/pip" install --upgrade pip
-    "$VENV/bin/pip" install gdown
     if [ "$USE_ACCELEROMETER" = true ]; then
         echo "  Installing accelerometer Python package..."
         "$VENV/bin/pip" install adafruit-circuitpython-adxl34x
@@ -194,42 +193,56 @@ sudo mount -a   # activate without requiring a reboot
 echo ""
 echo "[6/9] Installing Tetra3..."
 if [ "$HAVE_INTERNET" = true ]; then
-    if [ ! -d "$EFINDER_HOME/tetra3" ]; then
-        sudo -u "$EFINDER_USER" git clone https://github.com/esa/tetra3.git "$EFINDER_HOME/tetra3"
+    # Clone into tetra3_source — keeps source separate from the installed package
+    # and prevents Python from shadowing the venv installation with the source tree.
+    if [ ! -d "$EFINDER_HOME/tetra3_source" ]; then
+        sudo -u "$EFINDER_USER" git clone https://github.com/esa/tetra3.git \
+            "$EFINDER_HOME/tetra3_source"
     fi
-    cd "$EFINDER_HOME/tetra3"
-    "$VENV/bin/pip" install .
-
-    # Resolve the venv tetra3 data path dynamically to avoid hardcoding
-    # the Python minor version, which may change across OS upgrades.
-    TETRA3_DATA=$("$VENV/bin/python3" -c \
-        "import tetra3, os; print(os.path.join(os.path.dirname(tetra3.__file__), 'data'))" \
-        2>/dev/null) || TETRA3_DATA=""
-
-    if [ -z "$TETRA3_DATA" ]; then
-        echo "  WARNING: Could not determine tetra3 data path."
-        echo "           Re-run install.sh with internet access to install Tetra3."
+    cd "$EFINDER_HOME/tetra3_source"
+    # Only install if not already correctly installed in the venv.
+    # --force-reinstall requires internet to fetch build dependencies even
+    # when the source is local, so avoid it on re-runs.
+    if ! "$VENV/bin/python3" -c "
+import tetra3, os
+path = tetra3.__file__
+assert 'venv-efinder' in path, 'tetra3 not in venv'
+" 2>/dev/null; then
+        echo "  Installing tetra3 into venv..."
+        "$VENV/bin/pip" install .
     else
-        # Download only the database needed for this lens/camera combination.
-        # The t3_fov* databases are hosted on Google Drive separately from the
-        # tetra3 repo — the repo itself only includes default_database.npz.
-        echo "  Downloading t3_fov14_mag8 database to: $TETRA3_DATA"
-        "$VENV/bin/gdown" \
-            "https://drive.google.com/drive/folders/1uxbdttpg0Dpp8OuYUDY9arYoeglfZzcX" \
-            --folder \
-            --output "$TETRA3_DATA" \
-            --no-verbose \
-        && echo "  Database download complete." \
-        || echo "  WARNING: gdown failed. Copy t3_fov14_mag8.npz manually to $TETRA3_DATA"
+        echo "  Tetra3 already correctly installed in venv — skipping."
     fi
+    echo "  Tetra3 installed into venv from source."
 else
-    # Check if Tetra3 is already installed from a previous run
-    if "$VENV/bin/python3" -c "import tetra3" 2>/dev/null; then
-        echo "  Tetra3 already installed — skipping (no internet)."
-    else
+    if ! "$VENV/bin/python3" -c "import tetra3" 2>/dev/null; then
         echo "  WARNING: Tetra3 not installed and no internet available."
         echo "           Re-run install.sh with internet access to complete this step."
+    else
+        echo "  Tetra3 already installed — skipping (no internet)."
     fi
+fi
+
+# Install the Tetra3 database from the repo bundle.
+# The database is stored in Solver/databases/ in the repo — no external
+# download needed. To regenerate for a different lens see README.
+TETRA3_DATA=$("$VENV/bin/python3" -c \
+    "import tetra3, os; print(os.path.join(os.path.dirname(tetra3.__file__), 'data'))" \
+    2>/dev/null) || TETRA3_DATA=""
+
+DB_SOURCE="$REPO_DIR/Solver/databases"
+
+if [ -z "$TETRA3_DATA" ]; then
+    echo "  WARNING: Could not determine tetra3 data path — is tetra3 installed?"
+    echo "           Re-run install.sh with internet access to install Tetra3 first."
+elif [ ! -d "$DB_SOURCE" ] || [ -z "$(ls "$DB_SOURCE"/*.npz 2>/dev/null)" ]; then
+    echo "  WARNING: No database files found in $DB_SOURCE"
+    echo "           Add t3_fov14_mag8.npz to Solver/databases/ in the repo."
+    echo "           See README 'Generating a Tetra3 Database' for instructions."
+else
+    echo "  Installing database(s) from repo bundle to: $TETRA3_DATA"
+    cp "$DB_SOURCE"/*.npz "$TETRA3_DATA/"
+    echo "  Installed: $(ls "$DB_SOURCE"/*.npz | xargs -I{} basename {})"
 fi
 
 # ---------------------------------------------------------------------------
