@@ -54,18 +54,11 @@ jobs:
           
       - name: Clone cedar-solve
         run: |
-          echo "here1"
-          sudo mkdir -p /mnt/pi/tmp/cedar-solve
           if [ ! -d cedar-solve ]; then
-            echo "here2"
             git clone https://github.com/smroid/cedar-solve.git
-            echo "here3"
           else
-            echo "here4"
             git -C cedar-solve pull
-            echo "here5"
           fi
-          echo "here6"
           
       - name: Clone cedar-detect
         run: |
@@ -315,24 +308,19 @@ jobs:
           ##  grpcio \
           ##  cedar-solve
           # adafruit-circuitpython-adxl34x
-          
-          ## Install cedar-solve from source (v0.6.0)
-          #sudo cp -r cedar-solve /mnt/pi/home/efinder/
-          #$CHROOT su -s /bin/bash efinder -c \
-          #    "cd /home/efinder/cedar-solve && /home/efinder/venv-efinder/bin/pip install ."
-
-          ## Install other packages
-          #$CHROOT /home/efinder/venv-efinder/bin/pip install grpcio
-          
+                    
           # Copy cedar-solve source to a temp location in the chroot
+          echo "here 1"
           sudo cp -r cedar-solve /mnt/pi/tmp/cedar-solve
+          echo "here 2"
 
           # Install cedar-solve from source (v0.6.0) and other packages
+          echo "here 3"
           $CHROOT su -s /bin/bash efinder -c \
             "cd /tmp/cedar-solve && /home/efinder/venv-efinder/bin/pip install ."
-
+          echo "here 4"
           $CHROOT /home/efinder/venv-efinder/bin/pip install grpcio
-
+          echo "here 5"
           # Clean up temp cedar-solve copy
           sudo rm -rf /mnt/pi/tmp/cedar-solve
           
