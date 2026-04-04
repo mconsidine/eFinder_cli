@@ -304,9 +304,10 @@ jobs:
           # Generate the cedar-solve star database inside the chroot (QEMU).
           # Runs under QEMU aarch64 — expect 10-20 minutes on the runner.
           # ------------------------------------------------------------------
+          ##$CHROOT su -s /bin/bash efinder -c \
+          ##  "/home/efinder/venv-efinder/bin/python3 /home/efinder/generate_database.py"
           $CHROOT su -s /bin/bash efinder -c \
-            "/home/efinder/venv-efinder/bin/python3 /home/efinder/generate_database.py"
-
+            "/home/efinder/venv-efinder/bin/python3 /home/efinder/generate_database.py hip_main /home/efinder/Solver/cedar_database --max-fov 15 --min-fov 12 --star-max-magnitude 8.0"
           sudo rm -f /mnt/pi/home/efinder/generate_database.py
 
           # ------------------------------------------------------------------
