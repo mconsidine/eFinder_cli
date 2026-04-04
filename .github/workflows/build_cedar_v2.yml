@@ -97,7 +97,7 @@ jobs:
       # -----------------------------------------------------------------------
       - name: Generate Python gRPC stubs (host)
         run: |
-          #python3 -m pip install --upgrade pip
+          # python3 -m pip install --upgrade pip
           python3 -m pip install grpcio grpcio-tools
           python3 -m grpc_tools.protoc \
             -I cedar-detect/src/proto \
@@ -301,7 +301,8 @@ jobs:
           printf '[global]\nindex-url = https://pypi.org/simple\nno-extra-index = true\n' | \
             sudo tee /mnt/pi/home/efinder/venv-efinder/pip/pip.conf > /dev/null
 
-          $CHROOT /home/efinder/venv-efinder/bin/pip install --upgrade pip
+          $CHROOT /home/efinder/venv-efinder/bin/pip install pip
+          ##--upgrade pip
           
           ##$CHROOT /home/efinder/venv-efinder/bin/pip install \
           ##  grpcio \
