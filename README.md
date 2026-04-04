@@ -110,14 +110,17 @@ Log in with the password you set in the Imager.
 
 All commands below are run on the Pi over SSH.
 
-### 3.1 Install git and Clone the Repository
+### 3.1 Download the eFinder Bundle
 
-Git is not included in Raspberry Pi OS Lite and must be installed before cloning:
+No git installation is needed. Download and unpack the bundle directly using tools already on Pi OS Lite:
 
 ```bash
-sudo apt-get update && sudo apt-get install -y git
-git clone --branch tinySS https://github.com/mconsidine/eFinder_cli.git
-cd eFinder_cli
+curl -L https://github.com/mconsidine/eFinder_cli/archive/refs/heads/tinySS.zip \
+     -o /tmp/efinder.zip
+unzip /tmp/efinder.zip -d /tmp/
+mv /tmp/eFinder_cli-tinySS ~/eFinder_cli
+rm /tmp/efinder.zip
+cd ~/eFinder_cli
 ```
 
 ### 3.2 Run the Installer
