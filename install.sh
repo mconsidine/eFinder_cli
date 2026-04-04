@@ -132,11 +132,11 @@ fi
 
 if [ "$HAVE_INTERNET" = true ]; then
     "$VENV/bin/pip" install --upgrade pip
+    "$VENV/bin/pip" install gdown
     if [ "$USE_ACCELEROMETER" = true ]; then
         echo "  Installing accelerometer Python package..."
         "$VENV/bin/pip" install adafruit-circuitpython-adxl34x
     fi
-    "$VENV/bin/pip" install gdown
 else
     echo "  Skipping pip installs — no internet."
 fi
@@ -205,22 +205,27 @@ if [ "$HAVE_INTERNET" = true ]; then
     cd "$EFINDER_HOME/tetra3"
     "$VENV/bin/pip" install .
 
-    # Resolve the tetra3 data path using the venv's own Python to avoid
-    # hardcoding a Python minor version that may change across OS upgrades.
+    # Resolve the venv tetra3 data path dynamically to avoid hardcoding
+    # the Python minor version, which may change across OS upgrades.
     TETRA3_DATA=$("$VENV/bin/python3" -c \
         "import tetra3, os; print(os.path.join(os.path.dirname(tetra3.__file__), 'data'))" \
         2>/dev/null) || TETRA3_DATA=""
 
     if [ -z "$TETRA3_DATA" ]; then
-        echo "  WARNING: Could not determine tetra3 data path — skipping database download."
-        echo "           Run manually: $VENV/bin/gdown --folder <url> --output <tetra3_data_dir>"
+        echo "  WARNING: Could not determine tetra3 data path."
+        echo "           Re-run install.sh with internet access to install Tetra3."
     else
-        echo "  Tetra3 data directory: $TETRA3_DATA"
-        sudo -u "$EFINDER_USER" "$VENV/bin/gdown" \
-            --output "$TETRA3_DATA" \
+        # Download only the database needed for this lens/camera combination.
+        # The t3_fov* databases are hosted on Google Drive separately from the
+        # tetra3 repo — the repo itself only includes default_database.npz.
+        echo "  Downloading t3_fov14_mag8 database to: $TETRA3_DATA"
+        "$VENV/bin/gdown" \
+            "https://drive.google.com/drive/folders/1uxbdttpg0Dpp8OuYUDY9arYoeglfZzcX" \
             --folder \
-            https://drive.google.com/drive/folders/1uxbdttpg0Dpp8OuYUDY9arYoeglfZzcX \
-        || echo "  WARNING: gdown failed. Download Tetra3 databases manually if needed."
+            --output "$TETRA3_DATA" \
+            --no-verbose \
+        && echo "  Database download complete." \
+        || echo "  WARNING: gdown failed. Copy t3_fov14_mag8.npz manually to $TETRA3_DATA"
     fi
 else
     # Check if Tetra3 is already installed from a previous run
