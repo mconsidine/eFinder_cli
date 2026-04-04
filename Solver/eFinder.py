@@ -212,12 +212,32 @@ cam = (960, 760, 50.8, 13.5)
 # ---------------------------------------------------------------------------
 # Camera and Tetra3 initialisation
 # ---------------------------------------------------------------------------
-camera = Camera()
-camera.set(float(param.get("Exposure", "0.1")), param.get("Gain", "10"))
+try:
+    camera = Camera()
+    camera.set(float(param.get("Exposure", "0.1")), param.get("Gain", "10"))
+    cameraReady = True
+    print('Camera ready')
+except Exception as e:
+    print('ERROR: Camera initialisation failed:', e)
+    print('       Check camera cable and dtoverlay=imx477 in /boot/firmware/config.txt')
+    print('       Solve loop will not run without a camera.')
+    camera = None
+    cameraReady = False
 
 print('Loading Tetra3 database…')
-t3 = tetra3.Tetra3('t3_fov14_mag8')
-print('Tetra3 ready')
+try:
+    t3 = tetra3.Tetra3('t3_fov14_mag8')
+    databaseReady = True
+    print('Tetra3 ready')
+except FileNotFoundError:
+    print('ERROR: Tetra3 database t3_fov14_mag8.npz not found.')
+    print('       Run install.sh with internet access to download it.')
+    t3 = None
+    databaseReady = False
+except Exception as e:
+    print('ERROR: Tetra3 database load failed:', e)
+    t3 = None
+    databaseReady = False
 
 # Restore saved offset
 pix_x, pix_y = (
@@ -334,6 +354,12 @@ def saveImage(array, txt):
 # Continuous solve loop (runs in its own thread)
 # ---------------------------------------------------------------------------
 def loop_solve():
+    if not cameraReady:
+        print('Solve loop not started — no camera.')
+        return
+    if not databaseReady:
+        print('Solve loop not started — database not loaded.')
+        return
     while True:
         if not offset_flag:
             capture()
@@ -372,6 +398,8 @@ def setExp(a):
     return '1'
 
 def getAutoExp():
+    if not cameraReady:
+        return str(param.get('Exposure', '0.1'))
     expAuto = float(param['Exposure'])
     camera.set(expAuto, param['Gain'])
     np_image = capture()
@@ -396,6 +424,8 @@ def getAutoExp():
 # ---------------------------------------------------------------------------
 def measure_offset():
     global offset_str, offset_flag, offset, param
+    if not cameraReady or not databaseReady:
+        return 'fail'
     offset_flag = True
     print("Started capture for offset")
     solveImage(capture())
@@ -432,6 +462,8 @@ def measure_offset():
     return name + secondname + ',HIP' + hipId + ',' + offset_str
 
 def go_solve():
+    if not cameraReady or not databaseReady:
+        return '0'
     solveImage(capture())
     return '1' if solve else '0'
 
@@ -638,6 +670,10 @@ def serveWifi():
 # Main
 # ---------------------------------------------------------------------------
 print('eFinder version', version)
+print('Camera  :', 'OK' if cameraReady    else 'NOT AVAILABLE — solve loop disabled')
+print('Database:', 'OK' if databaseReady  else 'NOT FOUND — solve loop disabled')
+print('Accel   :', 'OK' if altAngle       else 'not fitted')
+print('')
 print('Starting solve loop…')
 solveloop = Thread(target=loop_solve, daemon=True)
 solveloop.start()
