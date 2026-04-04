@@ -69,7 +69,7 @@ Wait approximately 60–90 seconds for first boot to complete.
 
 ### 2.2 Find the Pi on Your Network
 
-**macOS / Linux** — open Terminal and connect:
+**macOS / Linux** — open Terminal and connect. The `efinder@` prefix is required — it tells SSH to log in as the `efinder` user rather than your local laptop username:
 
 ```bash
 ssh efinder@efinder.local
@@ -87,9 +87,22 @@ ssh efinder@<ip-address>
 ssh efinder@efinder.local
 ```
 
-If `efinder.local` does not resolve, find the IP from your router and use it directly. Alternatively install **PuTTY** (https://www.putty.org) for a graphical SSH client — enter hostname `efinder.local` or the IP address, port `22`, and connect.
+If `efinder.local` does not resolve, find the IP from your router and use it directly. Alternatively install **PuTTY** (https://www.putty.org) for a graphical SSH client — enter hostname `efinder.local` or the IP address, port `22`, username `efinder`, and connect.
+
+**Tip — avoid typing `efinder@` every time:** add an entry to your SSH config file so plain `ssh efinder.local` works automatically.
+
+On macOS/Linux, create or edit `~/.ssh/config` and add:
+
+```
+Host efinder.local
+    User efinder
+```
+
+On Windows the same file is at `C:\Users\<yourname>\.ssh\config`.
 
 Log in with the password you set in the Imager.
+
+> **If you see a "WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED" error:** this happens after reflashing — the Pi has new SSH host keys but your laptop remembers the old ones. It is not a security problem in this context. See the Troubleshooting section for the fix.
 
 ---
 
@@ -573,6 +586,55 @@ On next boot the update service runs before the main app, extracts the zip to `/
 ---
 
 ## Troubleshooting
+
+**"WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED" when trying to SSH**
+
+This happens every time you reflash the SD card. The Pi gets new SSH host keys after flashing but your laptop still has the old ones saved from a previous install. It is not a real security problem — it simply means the Pi looks different from what your laptop expected.
+
+The fix is to remove the old key from your laptop's known hosts file.
+
+**macOS / Linux:**
+```bash
+ssh-keygen -f "~/.ssh/known_hosts" -R "efinder.local"
+```
+
+If you also connect by IP address, remove that entry too:
+```bash
+ssh-keygen -f "~/.ssh/known_hosts" -R "192.168.50.1"
+```
+
+**Windows (PowerShell):**
+```powershell
+ssh-keygen -R "efinder.local"
+ssh-keygen -R "192.168.50.1"
+```
+
+Or open `C:\Users\<yourname>\.ssh\known_hosts` in a text editor, delete the line containing `efinder.local` or `192.168.50.1`, and save.
+
+After removing the old key, SSH in again normally and type `yes` when asked to confirm the new fingerprint:
+
+```bash
+ssh efinder@efinder.local
+```
+
+This will not happen again until the next reflash.
+
+**"Permission denied (publickey)" or connecting as wrong user**
+
+This happens when SSH tries to connect as your local laptop username instead of `efinder`. Always include the username explicitly:
+
+```bash
+ssh efinder@efinder.local
+```
+
+To avoid typing `efinder@` every time, add this to `~/.ssh/config` (macOS/Linux) or `C:\Users\<yourname>\.ssh\config` (Windows):
+
+```
+Host efinder.local
+    User efinder
+```
+
+After that, plain `ssh efinder.local` connects as `efinder` automatically.
 
 **eFinder service fails to start**
 
