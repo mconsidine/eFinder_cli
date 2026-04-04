@@ -103,6 +103,8 @@ if [ "$HAVE_INTERNET" = true ]; then
         python3-picamera2 \
         python3-scipy \
         git \
+        rpicam-apps \
+        netcat-openbsd \
         samba \
         samba-common-bin \
         apache2 \
@@ -263,6 +265,9 @@ sudo cp "$REPO_DIR/Solver/www/upload.php"   /var/www/html/
 sudo cp "$REPO_DIR/Solver/www/updater.html" /var/www/html/
 sudo cp "$REPO_DIR/Solver/www/user.ini"     /etc/php/8.2/apache2/conf.d/
 sudo cp "$REPO_DIR/Solver/www/user.ini"     /etc/php/8.2/cli/conf.d/
+
+# Copy README to web root so it is browseable in AP mode at http://192.168.50.1/README.md
+sudo cp "$REPO_DIR/README.md" /var/www/html/README.md
 
 # Move default Apache index out of the way (only once)
 [ -f /var/www/html/index.html ] && sudo mv /var/www/html/index.html /var/www/html/apacheindex.html
@@ -445,11 +450,33 @@ echo "  CPU governor set to performance mode."
 # Scoped to 'date' only — no broader sudo access granted.
 SUDOERS_FILE=/etc/sudoers.d/efinder-date
 if [ ! -f "$SUDOERS_FILE" ]; then
-    echo "$EFINDER_USER ALL=(ALL) NOPASSWD: /bin/date" | \
+    echo "$EFINDER_USER ALL=(ALL) NOPASSWD: /bin/date, /usr/bin/nmcli" | \
         sudo tee "$SUDOERS_FILE" > /dev/null
     sudo chmod 440 "$SUDOERS_FILE"
-    echo "  Sudoers rule written: efinder may run /bin/date without password."
+    echo "  Sudoers rule written: efinder may run /bin/date and /usr/bin/nmcli without password."
 fi
+
+# ---------------------------------------------------------------------------
+# Helper script: station.sh
+# Switches from AP mode to home network (station mode) in one command.
+# Intended to be run from the USB serial console when SSH is unavailable.
+# ---------------------------------------------------------------------------
+sudo tee "$EFINDER_HOME/station.sh" > /dev/null <<'EOF'
+#!/bin/bash
+echo "Switching to station (home network) mode..."
+sudo nmcli connection modify preconfigured autoconnect yes
+sudo nmcli connection up preconfigured
+echo ""
+echo "Done. Check your router for the Pi's IP address, or try:"
+echo "  ssh efinder@efinder.local"
+echo ""
+echo "To return to AP mode after you are done:"
+echo "  sudo nmcli connection modify preconfigured autoconnect no"
+echo "  sudo reboot now"
+EOF
+sudo chown "$EFINDER_USER:$EFINDER_USER" "$EFINDER_HOME/station.sh"
+sudo chmod 755 "$EFINDER_HOME/station.sh"
+echo "  station.sh installed at $EFINDER_HOME/station.sh"
 
 # ---------------------------------------------------------------------------
 # 13. systemd service: efinder-update (OTA zip updater, runs before main app)
