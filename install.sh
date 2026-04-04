@@ -270,9 +270,13 @@ sudo cp "$REPO_DIR/Solver/www/upload.php"   /var/www/html/
 sudo cp "$REPO_DIR/Solver/www/updater.html" /var/www/html/
 sudo cp "$REPO_DIR/Solver/www/user.ini"     /etc/php/8.2/apache2/conf.d/
 sudo cp "$REPO_DIR/Solver/www/user.ini"     /etc/php/8.2/cli/conf.d/
+sudo cp "$REPO_DIR/Solver/www/log.php"      /var/www/html/
 
 # Copy README to web root so it is browseable in AP mode at http://192.168.50.1/README.md
 sudo cp "$REPO_DIR/README.md" /var/www/html/README.md
+
+# Allow Apache (www-data) to read the systemd journal so log.php works
+sudo usermod -a -G systemd-journal www-data
 
 # Move default Apache index out of the way (only once)
 [ -f /var/www/html/index.html ] && sudo mv /var/www/html/index.html /var/www/html/apacheindex.html
