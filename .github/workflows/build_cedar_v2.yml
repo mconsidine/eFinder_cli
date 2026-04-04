@@ -54,11 +54,18 @@ jobs:
           
       - name: Clone cedar-solve
         run: |
+          echo "here1"
+          mkdir -p /mnt/pi/home/efinder/tmp
           if [ ! -d cedar-solve ]; then
+            echo "here2"
             git clone https://github.com/smroid/cedar-solve.git
+            echo "here3"
           else
+            echo "here4"
             git -C cedar-solve pull
+            echo "here5"
           fi
+          echo "here6"
           
       - name: Clone cedar-detect
         run: |
