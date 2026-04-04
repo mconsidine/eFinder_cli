@@ -61,19 +61,8 @@ echo " Device : $PI_MODEL"
 echo "============================================================================="
 
 # ---------------------------------------------------------------------------
-# 0. Bootstrap git — must be present before the repo clone step.
-#    Stock Pi OS Lite may not include it; install silently if missing.
-# ---------------------------------------------------------------------------
-if ! command -v git &>/dev/null; then
-    echo ""
-    echo "[0] git not found — installing..."
-    sudo apt update -q
-    sudo apt install -y git
-fi
-
-# ---------------------------------------------------------------------------
-# Check internet connectivity — required for apt and git clone.
-# On re-runs without internet, package steps are skipped if already done.
+# Check internet connectivity — required for apt, tetra3 clone, and bundle
+# re-download. On re-runs without internet, network steps are skipped.
 # ---------------------------------------------------------------------------
 if curl -s --max-time 5 https://github.com > /dev/null 2>&1; then
     HAVE_INTERNET=true
@@ -142,24 +131,30 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 3. Clone eFinder_cli
+# 3. Verify eFinder_cli bundle is present
+#    On first run the user downloads this via curl/unzip per the README.
+#    On re-runs the directory already exists. If missing, re-download it.
 # ---------------------------------------------------------------------------
 echo ""
-echo "[4/9] Cloning eFinder_cli (tinySS branch)..."
-REPO_URL="https://github.com/mconsidine/eFinder_cli.git"
+echo "[4/9] Checking eFinder_cli bundle..."
+REPO_URL="https://github.com/mconsidine/eFinder_cli/archive/refs/heads/tinySS.zip"
 REPO_DIR="$EFINDER_HOME/eFinder_cli"
-cd "$EFINDER_HOME"
 if [ ! -d "$REPO_DIR" ]; then
-    sudo -u "$EFINDER_USER" git clone --branch tinySS "$REPO_URL" "$REPO_DIR"
-else
-    echo "  Repo already present — attempting to pull latest tinySS..."
-    if sudo -u "$EFINDER_USER" git -C "$REPO_DIR" fetch origin 2>/dev/null; then
-        sudo -u "$EFINDER_USER" git -C "$REPO_DIR" checkout tinySS 2>/dev/null || true
-        sudo -u "$EFINDER_USER" git -C "$REPO_DIR" pull origin tinySS 2>/dev/null || true
-        echo "  Repo updated."
+    if [ "$HAVE_INTERNET" = true ]; then
+        echo "  Bundle not found — downloading from GitHub..."
+        curl -L "$REPO_URL" -o /tmp/efinder.zip
+        unzip /tmp/efinder.zip -d /tmp/
+        mv /tmp/eFinder_cli-tinySS "$REPO_DIR"
+        rm /tmp/efinder.zip
+        sudo chown -R "$EFINDER_USER:$EFINDER_USER" "$REPO_DIR"
+        echo "  Bundle downloaded and unpacked."
     else
-        echo "  WARNING: No internet access — using existing repo contents."
+        echo "ERROR: eFinder_cli bundle not found and no internet access."
+        echo "       Download and unpack the bundle first — see README Part 3.1."
+        exit 1
     fi
+else
+    echo "  Bundle already present at $REPO_DIR"
 fi
 
 # ---------------------------------------------------------------------------
