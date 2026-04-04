@@ -309,13 +309,25 @@ jobs:
           ##  cedar-solve
           # adafruit-circuitpython-adxl34x
           
-          # Install cedar-solve from source (v0.6.0)
-          sudo cp -r cedar-solve /mnt/pi/home/efinder/
-          $CHROOT su -s /bin/bash efinder -c \
-              "cd /home/efinder/cedar-solve && /home/efinder/venv-efinder/bin/pip install ."
+          ## Install cedar-solve from source (v0.6.0)
+          #sudo cp -r cedar-solve /mnt/pi/home/efinder/
+          #$CHROOT su -s /bin/bash efinder -c \
+          #    "cd /home/efinder/cedar-solve && /home/efinder/venv-efinder/bin/pip install ."
 
-          # Install other packages
+          ## Install other packages
+          #$CHROOT /home/efinder/venv-efinder/bin/pip install grpcio
+          
+          # Copy cedar-solve source to a temp location in the chroot
+          sudo cp -r cedar-solve /mnt/pi/tmp/cedar-solve
+
+          # Install cedar-solve from source (v0.6.0) and other packages
+          $CHROOT su -s /bin/bash efinder -c \
+            "cd /tmp/cedar-solve && /home/efinder/venv-efinder/bin/pip install ."
+
           $CHROOT /home/efinder/venv-efinder/bin/pip install grpcio
+
+          # Clean up temp cedar-solve copy
+          sudo rm -rf /mnt/pi/tmp/cedar-solve
           
           # Remove the build-time pip.conf override so the venv behaves
           # normally on the Pi (falling back to system /etc/pip.conf).
