@@ -97,9 +97,12 @@ Log in with the password you set in the Imager.
 
 All commands below are run on the Pi over SSH.
 
-### 3.1 Clone the Repository
+### 3.1 Install git and Clone the Repository
+
+Git is not included in Raspberry Pi OS Lite and must be installed before cloning:
 
 ```bash
+sudo apt-get update && sudo apt-get install -y git
 git clone --branch tinySS https://github.com/mconsidine/eFinder_cli.git
 cd eFinder_cli
 ```
@@ -181,7 +184,7 @@ A healthy startup looks like:
 ```
 eFinder version 6.6
 Coordinates ready
-No accelerometer fitted
+Accelerometer disabled
 Loading Tetra3 database…
 Tetra3 ready
 Offset: (380.0, 480.0)
@@ -189,6 +192,41 @@ Starting solve loop…
 Starting WiFi/LX200 server…
 eFinder running — waiting for SkySafari connection on port 4060
 ```
+
+### 4.3 Test the LX200 Interface
+
+With the service running, confirm the LX200 server is responding by querying the version number from the Pi itself:
+
+```bash
+echo -n ':GV#' | nc 127.0.0.1 4060
+```
+
+You should get back `:GV6.6#` immediately. If nothing is returned the service is not listening on port 4060 — check `sudo systemctl status efinder`.
+
+### 4.4 Test the Camera
+
+Stop the service to release the camera, take a test frame, then restart:
+
+```bash
+sudo systemctl stop efinder
+rpicam-still --width 960 --height 760 --shutter 200000 --gain 20 --awbgains 1,1 --nopreview -o /tmp/view.jpg
+sudo systemctl start efinder
+```
+
+If `rpicam-still` succeeds without error the camera is correctly wired and the overlay is loaded. Pull the image to your laptop to inspect it:
+
+```bash
+# macOS
+scp efinder@192.168.50.1:/tmp/view.jpg . && open view.jpg
+
+# Linux
+scp efinder@192.168.50.1:/tmp/view.jpg . && xdg-open view.jpg
+
+# Windows PowerShell
+scp efinder@192.168.50.1:/tmp/view.jpg .
+```
+
+Then open `view.jpg` from File Explorer.
 
 ---
 
@@ -244,7 +282,7 @@ sudo systemctl start efinder
 Take a still image using the same exposure and gain settings the app uses, then pull it to your laptop to inspect:
 
 ```bash
-libcamera-still \
+rpicam-still \
   --width 960 --height 760 \
   --shutter 200000 \
   --gain 20 \
@@ -277,7 +315,7 @@ To iterate quickly without retyping, use a one-liner loop on the Pi:
 
 ```bash
 while true; do
-  libcamera-still --width 960 --height 760 \
+  rpicam-still --width 960 --height 760 \
     --shutter 200000 --gain 20 --awbgains 1,1 \
     --nopreview -o /tmp/focus_test.jpg && \
   echo "Image captured — adjust focus and press Enter for next, Ctrl-C to stop"
@@ -290,7 +328,7 @@ done
 For a real-time view while adjusting focus, stream video from the Pi:
 
 ```bash
-libcamera-vid \
+rpicam-vid \
   --timeout 0 \
   --width 960 --height 760 \
   --shutter 200000 \
@@ -322,7 +360,7 @@ Press Ctrl-C on the Pi to stop streaming when done.
 
 **Good:** The Moon. Bright, high-contrast, genuinely at infinity. Adjust `--shutter` down to `1000`–`5000` to avoid overexposure.
 
-**Acceptable for bench setup:** An artificial star — a pinhole (0.1–0.5 mm) over a light source at 10 metres or more. Closer than 10 m will not be at true infinity focus for a 25 mm focal length lens.
+**Acceptable for bench setup:** An artificial star — a pinhole (0.1–0.5 mm) over a torch at 10 metres or more. Closer than 10 m will not be at true infinity focus for a 25 mm focal length lens.
 
 **Avoid:** Daytime terrestrial targets at less than ~500 m. They are close enough that infinity focus will be slightly off, and the eFinder operates exclusively on star fields.
 
@@ -370,6 +408,94 @@ screen /dev/ttyACM0 115200
 **Windows** — the device appears as a **COM port** (e.g. `COM3`) in Device Manager under *Ports (COM & LPT)*. Use **CoolTerm** (https://freeware.the-meiers.org) or **PuTTY** — select Serial, enter the COM port number, speed 115200.
 
 All platforms: connect at **115200 baud, 8N1**. This gives a login prompt directly — useful if the WiFi AP is not starting correctly.
+
+---
+
+### Switching Between AP Mode and Station (Home Network) Mode
+
+By default the eFinder boots into AP mode. There are times when you need it back on your home network — to re-run the installer, download updates, or diagnose a problem from a computer that has no WiFi. This section covers the full round-trip.
+
+#### Step 1 — Get a Console
+
+If you cannot SSH in because the Pi is in AP mode and your computer has no WiFi, connect via the USB serial console (see above). Log in as `efinder`.
+
+If you are already connected to the eFinder WiFi on another device, SSH in normally:
+
+```bash
+ssh efinder@192.168.50.1
+```
+
+#### Step 2 — Switch to Station Mode (Home Network)
+
+A helper script is installed at `~/station.sh` for convenience. Run it from the serial console:
+
+```bash
+~/station.sh
+```
+
+Or run the two commands manually:
+
+```bash
+sudo nmcli connection modify preconfigured autoconnect yes
+sudo nmcli connection up preconfigured
+```
+
+NetworkManager will bring up your home WiFi immediately. The AP connection drops at the same time — the Pi Zero 2W has a single radio and cannot run both simultaneously.
+
+Confirm it worked:
+
+```bash
+nmcli connection show --active
+ip addr show wlan0
+```
+
+You should see your home network listed as active and a home network IP address on `wlan0`. You can now SSH in from any computer on your home network using that IP or `efinder.local`:
+
+```bash
+ssh efinder@efinder.local
+```
+
+Or find the IP address from your router's device list if `efinder.local` does not resolve.
+
+#### Step 3 — Do Whatever You Needed to Do
+
+Re-run the installer, update packages, copy files, diagnose issues. The Pi now has full internet access.
+
+If re-running the installer:
+
+```bash
+cd ~/eFinder_cli
+sudo bash install.sh
+```
+
+The installer will automatically disable home WiFi autoconnect at the very end before asking to reboot, so you do not need to do Step 4 manually if you let the installer complete.
+
+#### Step 4 — Return to AP Mode
+
+When you are done, disable home WiFi autoconnect and reboot:
+
+```bash
+sudo nmcli connection modify preconfigured autoconnect no
+sudo reboot now
+```
+
+After rebooting the eFinder comes back in AP mode as normal. Connect to the `efinder****` WiFi network and SSH to `192.168.50.1`.
+
+#### Quick Reference
+
+| Goal | Command |
+|------|---------|
+| Switch to home network (quick) | `~/station.sh` |
+| Switch to home network manually | `sudo nmcli connection up preconfigured` |
+| Make home network persist across reboots | `sudo nmcli connection modify preconfigured autoconnect yes` |
+| Switch back to AP now | `sudo nmcli connection up efinder-ap` |
+| Make AP the default again | `sudo nmcli connection modify preconfigured autoconnect no` |
+| Check what is currently active | `nmcli connection show --active` |
+| See all known connections | `nmcli connection show` |
+
+> **Note:** Changing `autoconnect` alone does not immediately switch networks — it only affects what happens at the next reboot. Use `nmcli connection up <name>` to switch immediately.
+
+---
 
 ### Samba File Share
 
@@ -428,7 +554,7 @@ journalctl -u efinder -b --no-pager
 ```
 
 Common causes:
-- Camera not detected — check `libcamera-hello --list-cameras`; verify the ribbon cable is seated; confirm `dtoverlay=imx477` is in `/boot/firmware/config.txt`
+- Camera not detected — check `rpicam-hello --list-cameras`; verify the ribbon cable is seated; confirm `dtoverlay=imx477` is in `/boot/firmware/config.txt`
 - Tetra3 database missing — check `~/venv-efinder/lib/python*/site-packages/tetra3/data/` contains `.npz` files
 
 **SkySafari cannot connect**
@@ -439,30 +565,45 @@ Common causes:
 
 **WiFi AP not appearing after reboot**
 
+Check whether the profile exists and bring it up manually:
+
 ```bash
 nmcli connection show
-nmcli connection up efinder-ap
+sudo nmcli connection up efinder-ap
 ```
 
-**Restore home WiFi temporarily** (to re-run installer or download updates):
+If `efinder-ap` is not listed, the AP profile was never created — re-run `install.sh` with internet access.
+
+**Need to SSH in but your computer has no WiFi**
+
+Use the USB serial console (see Maintenance Access above) to log in, then switch to station mode so your home network is available:
 
 ```bash
 sudo nmcli connection modify preconfigured autoconnect yes
 sudo nmcli connection up preconfigured
 ```
 
-To return to AP-only mode afterward:
+Then SSH in from your home network. See the **Switching Between AP Mode and Station Mode** section for the full round-trip procedure.
+
+**Restore home WiFi temporarily** (to re-run installer, download updates, or diagnose problems with internet access):
+
+```bash
+sudo nmcli connection modify preconfigured autoconnect yes
+sudo nmcli connection up preconfigured
+```
+
+To return to AP-only mode when done:
 
 ```bash
 sudo nmcli connection modify preconfigured autoconnect no
-sudo reboot
+sudo reboot now
 ```
 
 **Check camera overlay**
 
 ```bash
 vcgencmd get_config dtoverlay
-libcamera-hello --list-cameras
+rpicam-hello --list-cameras
 ```
 
 ---
@@ -489,10 +630,16 @@ Any TCP client (e.g. `nc`, a Python script, or a custom app) connected to port 4
 | `:IM1#` | `:IM1#` | Start saving debug images to `Solver/images/` |
 | `:IM0#` | `:IM1#` | Stop saving debug images |
 
-Example using netcat (macOS/Linux):
+Example using netcat — from your laptop on the eFinder WiFi (macOS/Linux):
 
 ```bash
 echo -n ':GV#' | nc 192.168.50.1 4060
+```
+
+Or from the Pi itself over SSH (uses loopback — works regardless of WiFi mode):
+
+```bash
+echo -n ':GV#' | nc 127.0.0.1 4060
 ```
 
 **Windows** — use PowerShell's built-in TCP client:
@@ -521,6 +668,7 @@ Or install **netcat for Windows** via winget: `winget install netcat` and use th
 ├── tetra3/                Tetra3 source
 ├── eFinder_cli/           Repository clone (tinySS branch)
 ├── uploads/               OTA update zip drop location
+├── station.sh             Switch to home network (run from serial console)
 └── Solver/
     ├── eFinder.py         Main application
     ├── eFinder.config     Saved exposure, gain, and offset settings
@@ -530,6 +678,7 @@ Or install **netcat for Windows** via winget: `winget install netcat` and use th
     ├── images/            Debug capture output (tmpfs — cleared on reboot)
     ├── default_hotspot.txt  AP SSID and password
     └── www/               Web UI files for OTA updater
+        └── README.md      This documentation (browseable at http://192.168.50.1/README.md)
 ```
 
 ---
