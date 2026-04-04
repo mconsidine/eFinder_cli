@@ -51,7 +51,15 @@ jobs:
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
           source "$HOME/.cargo/env"
           rustup target add aarch64-unknown-linux-gnu
-
+          
+      - name: Clone cedar-solve
+        run: |
+          if [ ! -d cedar-solve ]; then
+            git clone https://github.com/smroid/cedar-solve.git
+          else
+            git -C cedar-solve pull
+          fi
+          
       - name: Clone cedar-detect
         run: |
           if [ ! -d cedar-detect ]; then
@@ -110,15 +118,15 @@ jobs:
       #    echo aW1wb3J0IG9zLCBzeXMKaG9tZSA9ICcvaG9tZS9lZmluZGVyJwpzeXMucGF0aC5pbnNlcnQoMCwgb3MucGF0aC5qb2luKGhvbWUsICdTb2x2ZXInKSkKaW1wb3J0IHRldHJhMwpkYl9wYXRoID0gb3MucGF0aC5qb2luKGhvbWUsICdTb2x2ZXInLCAnY2VkYXJfZGF0YWJhc2UnKQp0MyA9IHRldHJhMy5UZXRyYTMobG9hZF9kYXRhYmFzZT1Ob25lKQp0My5nZW5lcmF0ZV9kYXRhYmFzZSgKICAgIG1heF9mb3Y9MTUsCiAgICBtaW5fZm92PTEyLAogICAgc2F2ZV9hcz1kYl9wYXRoLAogICAgc3Rhcl9jYXRhbG9nPSdoaXBfbWFpbicsCiAgICBzdGFyX21heF9tYWduaXR1ZGU9OC4wLAogICAgcGF0dGVybl9zdGFyc19wZXJfZm92PTEwLAogICAgY2F0YWxvZ19zdGFyc19wZXJfZm92PTIwLAopCnByaW50KCdEYXRhYmFzZSBzYXZlZCB0bycsIGRiX3BhdGggKyAnLm5weicpCg== | base64 -d > generate_database.py
       #    echo "--- generate_database.py ---"
       #    cat generate_database.py
-      - name: Stage database generation script from cedar-solve
-        run: |
-          # Clone cedar-solve to get the CLI tools
-          git clone https://github.com/smroid/cedar-solve.git
-          cp cedar-solve/tetra3/cli/generate_database.py generate_database.py
-          # Modify it to use the correct output path if needed
-          sed -i "s|'tetra3_database'|'/home/efinder/Solver/cedar_database'|g" generate_database.py
-          echo "--- generate_database.py ---"
-          cat generate_database.py
+      ##- name: Stage database generation script from cedar-solve
+      ##  run: |
+      ##    # Clone cedar-solve to get the CLI tools
+      ##    git clone https://github.com/smroid/cedar-solve.git
+      ##    cp cedar-solve/tetra3/cli/generate_database.py generate_database.py
+      ##    # Modify it to use the correct output path if needed
+      ##    sed -i "s|'tetra3_database'|'/home/efinder/Solver/cedar_database'|g" generate_database.py
+      ##    echo "--- generate_database.py ---"
+      ##    cat generate_database.py
 
       # -----------------------------------------------------------------------
       # Download and unpack the base Raspberry Pi OS image.
@@ -189,9 +197,12 @@ jobs:
               /mnt/pi/home/efinder/Solver/cedar_detect_pb2.pyi 2>/dev/null || true
 
           # Database generation script (executed inside chroot, then deleted)
-          sudo install -m 644 generate_database.py \
+          ##sudo install -m 644 generate_database.py \
+          ##    /mnt/pi/home/efinder/generate_database.py
+          # Cedar-solve CLI tool for database generation
+          sudo install -m 755 cedar-solve/tetra3/cli/generate_database.py \
               /mnt/pi/home/efinder/generate_database.py
-
+    
           # Web interface files
           sudo mkdir -p /mnt/pi/var/www/html
           sudo install -m 644 Solver/www/index.php    /mnt/pi/var/www/html/
@@ -291,10 +302,19 @@ jobs:
             sudo tee /mnt/pi/home/efinder/venv-efinder/pip/pip.conf > /dev/null
 
           $CHROOT /home/efinder/venv-efinder/bin/pip install --upgrade pip
-          $CHROOT /home/efinder/venv-efinder/bin/pip install \
-            grpcio \
-            cedar-solve
+          
+          ##$CHROOT /home/efinder/venv-efinder/bin/pip install \
+          ##  grpcio \
+          ##  cedar-solve
           # adafruit-circuitpython-adxl34x
+          
+          # Install cedar-solve from source (v0.6.0)
+          sudo cp -r cedar-solve /mnt/pi/home/efinder/
+          $CHROOT su -s /bin/bash efinder -c \
+              "cd /home/efinder/cedar-solve && /home/efinder/venv-efinder/bin/pip install ."
+
+          # Install other packages
+          $CHROOT /home/efinder/venv-efinder/bin/pip install grpcio
           
           # Remove the build-time pip.conf override so the venv behaves
           # normally on the Pi (falling back to system /etc/pip.conf).
@@ -306,9 +326,15 @@ jobs:
           # ------------------------------------------------------------------
           ##$CHROOT su -s /bin/bash efinder -c \
           ##  "/home/efinder/venv-efinder/bin/python3 /home/efinder/generate_database.py"
+          ##$CHROOT su -s /bin/bash efinder -c \
+          ##  "/home/efinder/venv-efinder/bin/python3 /home/efinder/generate_database.py hip_main /home/efinder/Solver/cedar_database --max-fov 15 --min-fov 12 --star-max-magnitude 8.0"
+          ##sudo rm -f /mnt/pi/home/efinder/generate_database.py
+
           $CHROOT su -s /bin/bash efinder -c \
             "/home/efinder/venv-efinder/bin/python3 /home/efinder/generate_database.py hip_main /home/efinder/Solver/cedar_database --max-fov 15 --min-fov 12 --star-max-magnitude 8.0"
+
           sudo rm -f /mnt/pi/home/efinder/generate_database.py
+          sudo rm -rf /mnt/pi/home/efinder/cedar-solve
 
           # ------------------------------------------------------------------
           # Samba share definition (password set at runtime).
