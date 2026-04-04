@@ -97,7 +97,7 @@ jobs:
       # -----------------------------------------------------------------------
       - name: Generate Python gRPC stubs (host)
         run: |
-          python3 -m pip install --upgrade pip
+          #python3 -m pip install --upgrade pip
           python3 -m pip install grpcio grpcio-tools
           python3 -m grpc_tools.protoc \
             -I cedar-detect/src/proto \
