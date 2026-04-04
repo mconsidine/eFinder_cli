@@ -55,7 +55,7 @@ jobs:
       - name: Clone cedar-solve
         run: |
           echo "here1"
-          mkdir -p /mnt/pi/tmp/cedar-solve
+          sudo mkdir -p /mnt/pi/tmp/cedar-solve
           if [ ! -d cedar-solve ]; then
             echo "here2"
             git clone https://github.com/smroid/cedar-solve.git
