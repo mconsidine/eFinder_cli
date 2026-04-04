@@ -263,6 +263,33 @@ No interaction with the Pi is needed during normal use.
 
 ---
 
+## Web Interface
+
+From any device connected to the eFinder WiFi, open a browser and go to:
+
+| URL | What it shows |
+|-----|--------------|
+| `http://192.168.50.1/` | OTA update uploader |
+| `http://192.168.50.1/log.php` | Live eFinder log (auto-refreshes every 5s) |
+| `http://192.168.50.1/log.php?lines=100` | Last 100 log lines |
+| `http://192.168.50.1/README.md` | This documentation |
+
+The log page is the fastest way to check whether the eFinder is running correctly without needing SSH. A healthy log looks like:
+
+```
+eFinder version 6.6
+Camera  : OK
+Database: OK
+Accel   : not fitted
+Starting solve loop…
+Starting WiFi/LX200 server…
+eFinder running — waiting for SkySafari connection on port 4060
+```
+
+If the camera or database failed to load the log will show clearly which one and why.
+
+---
+
 ## Part 7 — Focusing
 
 The eFinder application must **not** be running while you focus, since it holds the camera exclusively. Stop it first:
@@ -549,6 +576,8 @@ On next boot the update service runs before the main app, extracts the zip to `/
 
 **eFinder service fails to start**
 
+Check the log — either via SSH or directly in the browser at `http://192.168.50.1/log.php`:
+
 ```bash
 journalctl -u efinder -b --no-pager
 ```
@@ -678,7 +707,8 @@ Or install **netcat for Windows** via winget: `winget install netcat` and use th
     ├── images/            Debug capture output (tmpfs — cleared on reboot)
     ├── default_hotspot.txt  AP SSID and password
     └── www/               Web UI files for OTA updater
-        └── README.md      This documentation (browseable at http://192.168.50.1/README.md)
+        ├── log.php        Live log viewer (http://192.168.50.1/log.php)
+        └── README.md      This documentation (http://192.168.50.1/README.md)
 ```
 
 ---
