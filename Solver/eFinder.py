@@ -25,6 +25,16 @@ import tetra3
 home_path = str(Path.home())
 version   = "6.6"
 
+# =============================================================================
+# CONFIGURATION
+# =============================================================================
+
+# Set to True if an ADXL343 accelerometer is wired to the I2C bus.
+# When False no accelerometer import is attempted and :GA always returns '-2'.
+USE_ACCELEROMETER = False
+
+# =============================================================================
+
 # If invoked with an argument, kill any already-running instance first.
 # (Allows manual restart from SSH without rebooting.)
 if len(sys.argv) > 1:
@@ -157,18 +167,22 @@ class Coordinates:
 coordinates = Coordinates()
 
 # ---------------------------------------------------------------------------
-# Accelerometer (optional — graceful fallback if not fitted)
+# Accelerometer (optional — controlled by USE_ACCELEROMETER flag above)
 # ---------------------------------------------------------------------------
-try:
-    import board
-    import adafruit_adxl34x
-    i2c    = board.I2C()
-    angle  = adafruit_adxl34x.ADXL343(i2c)
-    altAngle = True
-    print('Accelerometer found')
-except Exception:
-    print('No accelerometer fitted')
-    altAngle = False
+altAngle = False
+if USE_ACCELEROMETER:
+    try:
+        import board
+        import adafruit_adxl34x
+        i2c   = board.I2C()
+        angle = adafruit_adxl34x.ADXL343(i2c)
+        altAngle = True
+        print('Accelerometer found')
+    except Exception:
+        print('Accelerometer enabled in config but not found on I2C bus')
+        altAngle = False
+else:
+    print('Accelerometer disabled')
 
 # ---------------------------------------------------------------------------
 # Globals
@@ -245,8 +259,11 @@ def solveImage(img):
     start_time = time.time()
     print("Started solving")
 
-    np_image  = np.asarray(img, dtype=np.uint8)
-    centroids = tetra3.get_centroids_from_image(np_image, downsample=1)
+    # img is already uint8 from the camera — use directly, no copy needed
+    np_image  = img if img.dtype == np.uint8 else img.astype(np.uint8)
+    # downsample=2 quarters the pixel count, ~4x faster centroid detection
+    # with negligible accuracy loss for the star sizes at this focal length
+    centroids = tetra3.get_centroids_from_image(np_image, downsample=2)
     print('Centroids:', len(centroids), '  Peak:', np.max(np_image))
 
     if len(centroids) < 15:
@@ -322,6 +339,8 @@ def loop_solve():
             capture()
             solveImage(capArray)
             print('****************')
+        else:
+            time.sleep(0.05)   # avoid busy-spin while offset measurement runs
 
 # ---------------------------------------------------------------------------
 # Exposure / gain helpers
