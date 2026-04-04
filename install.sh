@@ -13,6 +13,17 @@ EFINDER_USER=efinder
 VENV="$EFINDER_HOME/venv-efinder"
 INSTALL_MARKER="$EFINDER_HOME/.efinder_installed"
 
+# =============================================================================
+# CONFIGURATION — edit these before running if needed
+# =============================================================================
+
+# Set to true if an ADXL343 accelerometer is wired to the I2C bus.
+# When false: python3-smbus is not installed, adafruit pip package is skipped,
+# and I2C is not enabled. The app handles absence gracefully at runtime.
+USE_ACCELEROMETER=false
+
+# =============================================================================
+
 # ---------------------------------------------------------------------------
 # Guard: must be run as the efinder user (with sudo), not as root directly.
 # File ownership inside $EFINDER_HOME will be wrong if run as root.
@@ -50,36 +61,83 @@ echo " Device : $PI_MODEL"
 echo "============================================================================="
 
 # ---------------------------------------------------------------------------
+# 0. Bootstrap git — must be present before the repo clone step.
+#    Stock Pi OS Lite may not include it; install silently if missing.
+# ---------------------------------------------------------------------------
+if ! command -v git &>/dev/null; then
+    echo ""
+    echo "[0] git not found — installing..."
+    sudo apt update -q
+    sudo apt install -y git
+fi
+
+# ---------------------------------------------------------------------------
+# Check internet connectivity — required for apt and git clone.
+# On re-runs without internet, package steps are skipped if already done.
+# ---------------------------------------------------------------------------
+if curl -s --max-time 5 https://github.com > /dev/null 2>&1; then
+    HAVE_INTERNET=true
+    echo "Internet connectivity confirmed."
+else
+    HAVE_INTERNET=false
+    echo "WARNING: No internet access detected."
+    echo "  Package installation and repo update steps will be skipped."
+    echo "  This is safe on a re-run if packages were already installed."
+fi
+
+# ---------------------------------------------------------------------------
 # 1. System update & package installation
 # ---------------------------------------------------------------------------
 echo ""
-echo "[1/9] Updating system packages..."
-sudo apt update
-sudo apt upgrade -y
+if [ "$HAVE_INTERNET" = true ]; then
+    echo "[1/9] Updating system packages..."
+    sudo apt update
+    sudo apt upgrade -y
 
-echo ""
-echo "[2/9] Installing required packages..."
-sudo apt install -y \
-    python3-pip \
-    python3-pil \
-    python3-pil.imagetk \
-    python3-smbus \
-    python3-picamera2 \
-    python3-scipy \
-    samba \
-    samba-common-bin \
-    apache2 \
-    php8.2 \
-    libapache2-mod-php8.2
+    echo ""
+    echo "[2/9] Installing required packages..."
+    sudo apt install -y \
+        python3-pip \
+        python3-pil \
+        python3-pil.imagetk \
+        python3-picamera2 \
+        python3-scipy \
+        git \
+        samba \
+        samba-common-bin \
+        apache2 \
+        php8.2 \
+        libapache2-mod-php8.2
+
+    if [ "$USE_ACCELEROMETER" = true ]; then
+        echo "  Installing accelerometer support packages..."
+        sudo apt install -y python3-smbus
+    fi
+else
+    echo "[1/9] Skipping package update — no internet."
+    echo "[2/9] Skipping package install — no internet."
+fi
 
 # ---------------------------------------------------------------------------
 # 2. Python virtual environment
 # ---------------------------------------------------------------------------
 echo ""
 echo "[3/9] Setting up Python virtual environment..."
-sudo -u "$EFINDER_USER" python3 -m venv "$VENV" --system-site-packages
-"$VENV/bin/pip" install --upgrade pip
-"$VENV/bin/pip" install adafruit-circuitpython-adxl34x gdown
+# Create venv if not already present — safe to run without internet
+if [ ! -d "$VENV" ]; then
+    sudo -u "$EFINDER_USER" python3 -m venv "$VENV" --system-site-packages
+fi
+
+if [ "$HAVE_INTERNET" = true ]; then
+    "$VENV/bin/pip" install --upgrade pip
+    if [ "$USE_ACCELEROMETER" = true ]; then
+        echo "  Installing accelerometer Python package..."
+        "$VENV/bin/pip" install adafruit-circuitpython-adxl34x
+    fi
+    "$VENV/bin/pip" install gdown
+else
+    echo "  Skipping pip installs — no internet."
+fi
 
 # ---------------------------------------------------------------------------
 # 3. Clone eFinder_cli
@@ -92,10 +150,14 @@ cd "$EFINDER_HOME"
 if [ ! -d "$REPO_DIR" ]; then
     sudo -u "$EFINDER_USER" git clone --branch tinySS "$REPO_URL" "$REPO_DIR"
 else
-    echo "  Repo already present — fetching latest tinySS..."
-    sudo -u "$EFINDER_USER" git -C "$REPO_DIR" fetch origin
-    sudo -u "$EFINDER_USER" git -C "$REPO_DIR" checkout tinySS
-    sudo -u "$EFINDER_USER" git -C "$REPO_DIR" pull origin tinySS
+    echo "  Repo already present — attempting to pull latest tinySS..."
+    if sudo -u "$EFINDER_USER" git -C "$REPO_DIR" fetch origin 2>/dev/null; then
+        sudo -u "$EFINDER_USER" git -C "$REPO_DIR" checkout tinySS 2>/dev/null || true
+        sudo -u "$EFINDER_USER" git -C "$REPO_DIR" pull origin tinySS 2>/dev/null || true
+        echo "  Repo updated."
+    else
+        echo "  WARNING: No internet access — using existing repo contents."
+    fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -116,6 +178,7 @@ find "$REPO_DIR/Solver" -maxdepth 1 -type f | while read -r f; do
     cp "$f" "$EFINDER_HOME/Solver/"
 done
 sudo chown -R "$EFINDER_USER:$EFINDER_USER" "$EFINDER_HOME/Solver"
+sudo chmod 755 "$EFINDER_HOME/Solver/eFinder.py"
 
 # RAM-backed tmpfs mounts for image scratch space
 # Add only if not already present
@@ -133,28 +196,38 @@ sudo mount -a   # activate without requiring a reboot
 # ---------------------------------------------------------------------------
 echo ""
 echo "[6/9] Installing Tetra3..."
-if [ ! -d "$EFINDER_HOME/tetra3" ]; then
-    sudo -u "$EFINDER_USER" git clone https://github.com/esa/tetra3.git "$EFINDER_HOME/tetra3"
-fi
-cd "$EFINDER_HOME/tetra3"
-"$VENV/bin/pip" install .
+if [ "$HAVE_INTERNET" = true ]; then
+    if [ ! -d "$EFINDER_HOME/tetra3" ]; then
+        sudo -u "$EFINDER_USER" git clone https://github.com/esa/tetra3.git "$EFINDER_HOME/tetra3"
+    fi
+    cd "$EFINDER_HOME/tetra3"
+    "$VENV/bin/pip" install .
 
-# Resolve the tetra3 data path using the venv's own Python to avoid
-# hardcoding a Python minor version that may change across OS upgrades.
-TETRA3_DATA=$("$VENV/bin/python3" -c \
-    "import tetra3, os; print(os.path.join(os.path.dirname(tetra3.__file__), 'data'))" \
-    2>/dev/null) || TETRA3_DATA=""
+    # Resolve the tetra3 data path using the venv's own Python to avoid
+    # hardcoding a Python minor version that may change across OS upgrades.
+    TETRA3_DATA=$("$VENV/bin/python3" -c \
+        "import tetra3, os; print(os.path.join(os.path.dirname(tetra3.__file__), 'data'))" \
+        2>/dev/null) || TETRA3_DATA=""
 
-if [ -z "$TETRA3_DATA" ]; then
-    echo "  WARNING: Could not determine tetra3 data path — skipping database download."
-    echo "           Run manually: $VENV/bin/gdown --folder <url> --output <tetra3_data_dir>"
+    if [ -z "$TETRA3_DATA" ]; then
+        echo "  WARNING: Could not determine tetra3 data path — skipping database download."
+        echo "           Run manually: $VENV/bin/gdown --folder <url> --output <tetra3_data_dir>"
+    else
+        echo "  Tetra3 data directory: $TETRA3_DATA"
+        sudo -u "$EFINDER_USER" "$VENV/bin/gdown" \
+            --output "$TETRA3_DATA" \
+            --folder \
+            https://drive.google.com/drive/folders/1uxbdttpg0Dpp8OuYUDY9arYoeglfZzcX \
+        || echo "  WARNING: gdown failed. Download Tetra3 databases manually if needed."
+    fi
 else
-    echo "  Tetra3 data directory: $TETRA3_DATA"
-    sudo -u "$EFINDER_USER" "$VENV/bin/gdown" \
-        --output "$TETRA3_DATA" \
-        --folder \
-        https://drive.google.com/drive/folders/1uxbdttpg0Dpp8OuYUDY9arYoeglfZzcX \
-    || echo "  WARNING: gdown failed. Download Tetra3 databases manually if needed."
+    # Check if Tetra3 is already installed from a previous run
+    if "$VENV/bin/python3" -c "import tetra3" 2>/dev/null; then
+        echo "  Tetra3 already installed — skipping (no internet)."
+    else
+        echo "  WARNING: Tetra3 not installed and no internet available."
+        echo "           Re-run install.sh with internet access to complete this step."
+    fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -333,12 +406,40 @@ sudo systemctl enable --now ssh
 # ---------------------------------------------------------------------------
 # 12. Interface / peripheral setup via raspi-config
 # ---------------------------------------------------------------------------
-sudo raspi-config nonint do_i2c 0          # enable I2C (for ADXL accelerometer)
 sudo raspi-config nonint do_serial_cons 1  # disable serial console (keep port for GPS/etc)
+
+if [ "$USE_ACCELEROMETER" = true ]; then
+    sudo raspi-config nonint do_i2c 0      # enable I2C for ADXL343 accelerometer
+    echo "  I2C enabled for accelerometer."
+else
+    echo "  Accelerometer disabled — skipping I2C setup."
+fi
 
 # Reduce swap activity (images are in RAM; avoid wearing SD card)
 grep -q "vm.swappiness" /etc/sysctl.conf || \
     echo 'vm.swappiness = 0' | sudo tee -a /etc/sysctl.conf > /dev/null
+
+# Set CPU governor to performance mode — keeps all 4 cores at full clock.
+# The Pi Zero 2W defaults to ondemand which throttles under light load,
+# hurting centroid detection and plate solving latency.
+# Implemented as a oneshot systemd service so it survives reboots cleanly.
+sudo tee /etc/systemd/system/cpu-performance.service > /dev/null <<'EOF'
+[Unit]
+Description=Set CPU governor to performance mode
+After=sysinit.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'echo performance | tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor'
+StandardOutput=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+sudo systemctl daemon-reload
+sudo systemctl enable --now cpu-performance.service
+echo "  CPU governor set to performance mode."
 
 # Allow the efinder app to set the system clock (needed for SkySafari time sync).
 # Scoped to 'date' only — no broader sudo access granted.
@@ -351,22 +452,13 @@ if [ ! -f "$SUDOERS_FILE" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# 13. Deploy cleaned-up eFinder.py
-# ---------------------------------------------------------------------------
-echo ""
-echo "[13/13] Deploying eFinder application..."
-sudo cp "$(dirname "$0")/eFinder.py" "$EFINDER_HOME/Solver/eFinder.py"
-sudo chown "$EFINDER_USER:$EFINDER_USER" "$EFINDER_HOME/Solver/eFinder.py"
-sudo chmod 755 "$EFINDER_HOME/Solver/eFinder.py"
-
-# ---------------------------------------------------------------------------
-# 15. systemd service: efinder-update (OTA zip updater, runs before main app)
+# 13. systemd service: efinder-update (OTA zip updater, runs before main app)
 #     Replaces the zip-check logic that was in loader.py.
 #     Runs once at boot as root, applies any zip in /home/efinder/uploads/,
 #     then exits so efinder.service can start.
 # ---------------------------------------------------------------------------
 echo ""
-echo "[15] Installing efinder-update systemd service..."
+echo "[13] Installing efinder-update systemd service..."
 sudo tee /etc/systemd/system/efinder-update.service > /dev/null <<'EOF'
 [Unit]
 Description=eFinder OTA update checker
@@ -411,12 +503,12 @@ sudo chown root:root "$EFINDER_HOME/Solver/apply_update.sh"
 sudo systemctl enable efinder-update.service
 
 # ---------------------------------------------------------------------------
-# 16. systemd service: efinder (main application)
+# 14. systemd service: efinder (main application)
 #     Starts after OTA update check; restarts on failure with a cap to avoid
 #     reboot loops if the camera is genuinely absent or misconfigured.
 # ---------------------------------------------------------------------------
 echo ""
-echo "[16] Installing efinder systemd service..."
+echo "[14] Installing efinder systemd service..."
 sudo tee /etc/systemd/system/efinder.service > /dev/null <<'EOF'
 [Unit]
 Description=eFinder telescope plate solver
