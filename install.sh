@@ -251,8 +251,9 @@ else
 fi
 
 # Install the Tetra3 database from the repo bundle.
-# The database is stored in Solver/databases/ in the repo — no external
-# download needed. To regenerate for a different lens see README.
+# Must cd away from tetra3_source first — if cwd is the source tree Python
+# imports tetra3 from there instead of the venv, giving the wrong data path.
+cd "$EFINDER_HOME"
 TETRA3_DATA=$("$VENV/bin/python3" -c \
     "import tetra3, os; print(os.path.join(os.path.dirname(tetra3.__file__), 'data'))" \
     2>/dev/null) || TETRA3_DATA=""
@@ -271,7 +272,16 @@ else
     sudo mkdir -p "$TETRA3_DATA"
     sudo cp "$DB_SOURCE"/*.npz "$TETRA3_DATA/"
     sudo chmod 644 "$TETRA3_DATA"/*.npz
-    echo "  Installed: $(ls "$DB_SOURCE"/*.npz | xargs -I{} basename {})"
+    # Verify the copy succeeded and the file is readable
+    for f in "$DB_SOURCE"/*.npz; do
+        fname=$(basename "$f")
+        if [ -r "$TETRA3_DATA/$fname" ]; then
+            echo "  OK: $fname ($(du -h "$TETRA3_DATA/$fname" | cut -f1))"
+        else
+            echo "  ERROR: $fname was not copied or is not readable at $TETRA3_DATA/$fname"
+            echo "         Manual fix: sudo cp $f $TETRA3_DATA/"
+        fi
+    done
 fi
 
 # ---------------------------------------------------------------------------
