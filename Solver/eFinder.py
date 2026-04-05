@@ -342,6 +342,9 @@ def solveImage(img):
 def saveImage(array, txt):
     global frame
     frame += 1
+    if frame >= 1000:
+        keep = False
+        frame = 0
     img  = Image.fromarray(array)
     img2 = ImageEnhance.Contrast(img).enhance(5)
     img2 = img2.rotate(angle=180)
