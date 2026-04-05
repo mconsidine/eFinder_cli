@@ -10,6 +10,8 @@ jobs:
 
       - name: Checkout repo
         uses: actions/checkout@v6
+        with:
+          ref: tiny_cedar_v2
 
       - name: Fix hostname resolution
         run: |
