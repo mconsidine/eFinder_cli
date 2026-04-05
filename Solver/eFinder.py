@@ -559,9 +559,6 @@ def serveWifi():
                         lon = x[3:].split('*')
                         # Longitude as decimal degrees West +ve
                         Long = int(lon[0]) + int(lon[1]) / 60
-                    elif cmd == 'SG':
-                        client.send(b'1')
-                        timeOffset = x[3:]
                     elif cmd == 'SL':
                         client.send(b'1')
                         timeStr = x[3:]
@@ -633,15 +630,14 @@ def serveWifi():
                         client.send((':Gt' + eTime + '#').encode('ascii'))
                     elif cmd == 'SE':   # adjust exposure (+1 or -1 step)
                         client.send((':SE' + adjExp(float(x[3:5])) + '#').encode('ascii'))
-                    elif cmd == 'SG':   # adjust gain (+1 or -1 step)
-                        # Note: SG is also used by LX200 for UTC offset — that
-                        # variant arrives as ':SG<offset>' with a sign character
-                        # at position 3, so distinguish by content length.
+                    elif cmd == 'SG':   # adjust gain (+1/-1) or set UTC offset
+                        # Short form (:SG+1 / :SG-1): adjust gain
+                        # Long form (:SG+05:30 etc): LX200 UTC offset
                         if len(x) <= 5:
                             client.send((':SG' + adjGain(float(x[3:5])) + '#').encode('ascii'))
                         else:
-                            # LX200 UTC offset form — already handled above as 'SG'
-                            pass
+                            client.send(b'1')
+                            timeOffset = x[3:]
                     elif cmd == 'SX':   # set absolute exposure value
                         client.send((':SX' + setExp(x.strip('#')[3:]) + '#').encode('ascii'))
                     elif cmd == 'GX':   # auto-expose
