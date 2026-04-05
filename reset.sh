@@ -54,7 +54,9 @@ sudo rm -rf "$EFINDER_HOME/tetra3_source"
 
 echo "[4] Removing repo bundle and Solver directory..."
 sudo rm -rf "$EFINDER_HOME/eFinder_cli"
-# Solver may be busy if picamera2 held files open — pkill above should clear it
+# Solver/images is a tmpfs mount — must unmount before rmdir will work
+sudo umount "$EFINDER_HOME/Solver/images" 2>/dev/null || true
+sudo umount /var/tmp 2>/dev/null || true
 sudo rm -rf "$EFINDER_HOME/Solver"
 
 echo "[5] Clearing uploads directory..."
