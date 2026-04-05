@@ -32,8 +32,10 @@ UPGRADE_PACKAGES=false
 # ---------------------------------------------------------------------------
 # Guard: must be run as the efinder user (with sudo), not as root directly.
 # File ownership inside $EFINDER_HOME will be wrong if run as root.
+# Supports both: sudo bash install.sh  AND  curl ... | sudo bash
 # ---------------------------------------------------------------------------
-RUNNING_AS="${SUDO_USER:-$(logname 2>/dev/null)}"
+RUNNING_AS="${SUDO_USER:-$(who am i 2>/dev/null | awk '{print $1}')}"
+RUNNING_AS="${RUNNING_AS:-$EFINDER_USER}"  # default to efinder in piped context
 if [ "$RUNNING_AS" != "$EFINDER_USER" ]; then
     echo "ERROR: Run this script as the '$EFINDER_USER' user, e.g.:"
     echo "       sudo bash install.sh   (while logged in as $EFINDER_USER)"
@@ -47,8 +49,12 @@ PI_MODEL=$(tr -d '\0' < /proc/device-tree/model 2>/dev/null || echo "unknown")
 if [[ "$PI_MODEL" != *"Zero 2"* ]]; then
     echo "WARNING: This script is designed for Raspberry Pi Zero 2W."
     echo "         Detected: $PI_MODEL"
-    read -rp "Continue anyway? [y/N] " confirm
-    [[ "$confirm" =~ ^[Yy]$ ]] || exit 1
+    if [ -t 0 ]; then
+        read -rp "Continue anyway? [y/N] " confirm
+        [[ "$confirm" =~ ^[Yy]$ ]] || exit 1
+    else
+        echo "  Non-interactive mode — continuing anyway."
+    fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -56,8 +62,12 @@ fi
 # ---------------------------------------------------------------------------
 if [ -f "$INSTALL_MARKER" ]; then
     echo "NOTE: $INSTALL_MARKER exists — this device has been installed before."
-    read -rp "Re-run full install anyway? [y/N] " rerun
-    [[ "$rerun" =~ ^[Yy]$ ]] || exit 0
+    if [ -t 0 ]; then
+        read -rp "Re-run full install anyway? [y/N] " rerun
+        [[ "$rerun" =~ ^[Yy]$ ]] || exit 0
+    else
+        echo "  Non-interactive mode — re-running install."
+    fi
 fi
 
 echo "============================================================================="
@@ -629,7 +639,13 @@ date > "$INSTALL_MARKER"
 echo "Disabling autoconnect on 'preconfigured' WiFi client profile..."
 nmcli connection modify "preconfigured" autoconnect no 2>/dev/null || true
 
-read -rp "Reboot now? [y/N] " ans
-if [[ "$ans" =~ ^[Yy]$ ]]; then
+if [ -t 0 ]; then
+    read -rp "Reboot now? [y/N] " ans
+    if [[ "$ans" =~ ^[Yy]$ ]]; then
+        sudo reboot now
+    fi
+else
+    echo "Non-interactive mode — rebooting in 5 seconds..."
+    sleep 5
     sudo reboot now
 fi

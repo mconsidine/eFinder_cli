@@ -110,26 +110,27 @@ Log in with the password you set in the Imager.
 
 All commands below are run on the Pi over SSH.
 
-### 3.1 Download the eFinder Bundle
+### 3.1 Run the Installer
 
-No git installation is needed. Download and unpack the bundle directly using tools already on Pi OS Lite:
+The entire install is triggered by a single command. It downloads the repo bundle automatically and handles everything from there:
 
 ```bash
-curl -L https://github.com/mconsidine/eFinder_cli/archive/refs/heads/tinySS.zip \
-     -o /tmp/efinder.zip
-unzip /tmp/efinder.zip -d /tmp/
-mv /tmp/eFinder_cli-tinySS ~/eFinder_cli
-rm /tmp/efinder.zip
-cd ~/eFinder_cli
+curl -sSL https://raw.githubusercontent.com/mconsidine/eFinder_cli/tinySS/install.sh | sudo bash
 ```
 
-### 3.2 Run the Installer
+The installer will run non-interactively, complete all steps, and **reboot automatically** when done.
+
+If you prefer to inspect the script before running it:
 
 ```bash
+curl -L https://raw.githubusercontent.com/mconsidine/eFinder_cli/tinySS/install.sh -o install.sh
+less install.sh
 sudo bash install.sh
 ```
 
-The installer will work through the following steps automatically:
+### 3.2 What the Installer Does
+
+The installer works through the following steps automatically:
 
 | Step | What happens |
 |------|-------------|
@@ -150,13 +151,15 @@ The installer will work through the following steps automatically:
 
 ### 3.3 Reboot
 
-When the installer finishes it will print a summary and ask:
+When run via the single `curl | sudo bash` command the Pi **reboots automatically** after installation completes.
+
+If you ran the script interactively (`sudo bash install.sh`) it will ask:
 
 ```
 Reboot now? [y/N]
 ```
 
-Type `y` and press Enter. The Pi will reboot.
+Type `y` and press Enter.
 
 ---
 
@@ -258,6 +261,8 @@ In SkySafari, go to **Settings → Telescope → Setup**:
 | Mount Type | Alt-Az (or match your mount) |
 | IP Address | `192.168.50.1` |
 | Port | `4060` |
+
+> **Important — do not use "Push To" scope type.** Push To uses a minimal subset of the LX200 protocol that omits the directional motion commands (`:Me#`, `:Mw#`, `:Ms#`, `:Mn#`). The eFinder uses these commands to start and stop image capture from the SkySafari arrow keys and to control exposure. Without them the live view and image capture controls will not work. Use **Meade LX-200 GPS** which sends the full command set.
 
 ### 5.2 Connect
 
