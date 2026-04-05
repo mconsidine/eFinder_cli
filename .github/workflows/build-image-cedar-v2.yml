@@ -1,4 +1,4 @@
-name: Build eFinder RPi Image v2 — Cedar edition (offline)
+name: v3 Build eFinder RPi Image v2 — Cedar edition (offline)
 
 on:
   workflow_dispatch:
