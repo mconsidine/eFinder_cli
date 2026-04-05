@@ -340,7 +340,7 @@ def solveImage(img):
 # Image saving (debug / alignment frames)
 # ---------------------------------------------------------------------------
 def saveImage(array, txt):
-    global frame, keep
+    global frame
     frame += 1
     img  = Image.fromarray(array)
     img2 = ImageEnhance.Contrast(img).enhance(5)
@@ -349,9 +349,6 @@ def saveImage(array, txt):
     d.text((70, 5), txt + "      Frame %d" % frame, font=fnt, fill='white')
     img2 = ImageOps.expand(img2, border=5, fill='red')
     img2.save(os.path.join(home_path, 'Solver/images/capture.jpg'))
-    if frame > 100:
-        keep  = False
-        frame = 0
 
 # ---------------------------------------------------------------------------
 # Continuous solve loop (runs in its own thread)
@@ -595,6 +592,7 @@ def serveWifi():
                     elif cmd == 'Mw':
                         keep  = False
                         frame = 0
+                        print('Stopped saving images')
                     elif cmd == 'Me':
                         print('Started saving images')
                         keep = True
