@@ -260,7 +260,9 @@ elif [ ! -d "$DB_SOURCE" ] || [ -z "$(ls "$DB_SOURCE"/*.npz 2>/dev/null)" ]; the
     echo "           See README 'Generating a Tetra3 Database' for instructions."
 else
     echo "  Installing database(s) from repo bundle to: $TETRA3_DATA"
-    cp "$DB_SOURCE"/*.npz "$TETRA3_DATA/"
+    sudo mkdir -p "$TETRA3_DATA"
+    sudo cp "$DB_SOURCE"/*.npz "$TETRA3_DATA/"
+    sudo chmod 644 "$TETRA3_DATA"/*.npz
     echo "  Installed: $(ls "$DB_SOURCE"/*.npz | xargs -I{} basename {})"
 fi
 
