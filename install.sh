@@ -446,10 +446,21 @@ sudo systemctl enable getty@ttyGS0.service 2>/dev/null || \
     echo "  Note: USB serial getty will activate after reboot."
 
 # ---------------------------------------------------------------------------
-# 11. SSH daemon — ensure enabled
+# 11. SSH daemon — ensure enabled with password authentication
 # ---------------------------------------------------------------------------
 sudo raspi-config nonint do_ssh 0
+
+# raspi-config do_ssh rewrites sshd_config using its own template which
+# sets PasswordAuthentication no on recent Bookworm images. Explicitly
+# set it back to yes so SSH password login works after install.
+sudo sed -i \
+    -e 's/^#*PasswordAuthentication.*/PasswordAuthentication yes/' \
+    -e 's/^#*ChallengeResponseAuthentication.*/ChallengeResponseAuthentication yes/' \
+    /etc/ssh/sshd_config
+
 sudo systemctl enable --now ssh
+sudo systemctl restart ssh
+echo "  SSH enabled with password authentication."
 
 # ---------------------------------------------------------------------------
 # 12. Interface / peripheral setup via raspi-config
