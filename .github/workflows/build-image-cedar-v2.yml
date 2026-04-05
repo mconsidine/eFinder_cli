@@ -1,6 +1,9 @@
 name: v3 Build eFinder RPi Image v2 — Cedar edition (offline)
 
 on:
+  push:
+    branches:
+      tiny_cedar_v2
   workflow_dispatch:
 
 jobs:
