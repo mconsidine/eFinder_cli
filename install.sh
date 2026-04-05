@@ -232,6 +232,9 @@ assert 'venv-efinder' in path, 'tetra3 not in venv'
     else
         echo "  Tetra3 already correctly installed in venv — skipping."
     fi
+    # Fix ownership — pip running under sudo may leave site-packages
+    # files owned by root, causing permission errors on cleanup.
+    sudo chown -R "$EFINDER_USER:$EFINDER_USER" "$VENV"
     echo "  Tetra3 installed into venv from source."
 else
     if ! "$VENV/bin/python3" -c "import tetra3" 2>/dev/null; then

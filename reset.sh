@@ -36,6 +36,11 @@ sudo systemctl disable efinder          2>/dev/null || true
 sudo systemctl disable efinder-update   2>/dev/null || true
 sudo systemctl disable cpu-performance  2>/dev/null || true
 
+# Kill any stray python processes holding camera or Solver directory open.
+# picamera2 can keep file handles alive briefly after systemctl stop.
+sudo pkill -f eFinder.py 2>/dev/null || true
+sleep 3
+
 echo "[2] Removing systemd unit files..."
 sudo rm -f /etc/systemd/system/efinder.service
 sudo rm -f /etc/systemd/system/efinder-update.service
@@ -43,12 +48,14 @@ sudo rm -f /etc/systemd/system/cpu-performance.service
 sudo systemctl daemon-reload
 
 echo "[3] Removing venv and tetra3 source..."
-rm -rf "$EFINDER_HOME/venv-efinder"
-rm -rf "$EFINDER_HOME/tetra3_source"
+# venv may be partly root-owned if pip ran under sudo during install
+sudo rm -rf "$EFINDER_HOME/venv-efinder"
+sudo rm -rf "$EFINDER_HOME/tetra3_source"
 
 echo "[4] Removing repo bundle and Solver directory..."
-rm -rf "$EFINDER_HOME/eFinder_cli"
-rm -rf "$EFINDER_HOME/Solver"
+sudo rm -rf "$EFINDER_HOME/eFinder_cli"
+# Solver may be busy if picamera2 held files open — pkill above should clear it
+sudo rm -rf "$EFINDER_HOME/Solver"
 
 echo "[5] Clearing uploads directory..."
 rm -f "$EFINDER_HOME/uploads/"*
