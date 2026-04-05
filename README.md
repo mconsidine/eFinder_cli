@@ -754,13 +754,308 @@ Or install **netcat for Windows** via winget: `winget install netcat` and use th
 
 ---
 
+## Generating a Tetra3 Database
+
+The eFinder uses a Tetra3 pattern database tuned for the specific FOV of your camera and lens combination. The default database (`t3_fov14_mag8.npz`) is built for a 13–14° FOV with stars to magnitude 8, which matches the IMX477 at 25mm focal length.
+
+If you change lenses, or need to regenerate the database from scratch, follow these steps.
+
+> **Memory warning:** The Pi Zero 2W has only 512MB RAM. Database generation is memory-intensive and may be killed by the OS. If this happens, generate the database on a laptop instead — see **Building on a Separate Machine** below.
+
+### When You Need a New Database
+
+| Situation | Action |
+|-----------|--------|
+| Longer focal length (narrower FOV) | Generate with smaller `max_fov` |
+| Shorter focal length (wider FOV) | Generate with larger `max_fov` |
+| Want more stars / fainter limit | Increase `star_max_magnitude` (8.5, 9.0) |
+| Want smaller/faster database | Decrease `star_max_magnitude` (7.0, 7.5) |
+| Database file missing or corrupt | Regenerate with same parameters |
+
+### Building on the Pi
+
+#### Step 1 — Switch to Station Mode
+
+The Pi needs internet access. From the serial console or SSH:
+
+```bash
+~/station.sh
+```
+
+#### Step 2 — Free Up Memory and Add Swap
+
+Stop services to free RAM, then add a temporary swap file:
+
+```bash
+sudo systemctl stop efinder
+sudo systemctl stop apache2
+sudo systemctl stop smbd
+free -h   # confirm available RAM before proceeding
+
+sudo fallocate -l 512M /swapfile
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
+```
+
+#### Step 3 — Download the Hipparcos Star Catalogue
+
+The Hipparcos catalogue (`hip_main.dat`) is the star source used to build the database. It contains 118,000 stars complete to magnitude 8+, and is about 47MB. It must be placed in the tetra3 package directory.
+
+```bash
+cd ~/tetra3/tetra3
+curl -k https://cdsarc.cds.unistra.fr/ftp/cats/I/239/hip_main.dat -o hip_main.dat
+```
+
+If that fails:
+
+```bash
+wget --no-check-certificate https://cdsarc.cds.unistra.fr/ftp/cats/I/239/hip_main.dat
+```
+
+#### Step 4 — Generate the Database
+
+```bash
+cd ~/tetra3/tetra3
+~/venv-efinder/bin/python3 -c "
+import tetra3
+t3 = tetra3.Tetra3(load_database=None)
+t3.generate_database(
+    max_fov=14,
+    min_fov=13,
+    star_max_magnitude=8.0,
+    save_as='t3_fov14_mag8',
+    star_catalog='hip_main',
+    pattern_stars_per_fov=10,
+    verification_stars_per_fov=30,
+)
+print('Database generation complete.')
+"
+```
+
+**This takes 10–20 minutes on a Pi Zero 2W.** Do not interrupt it. The output file appears in `~/tetra3/tetra3/` when complete.
+
+#### Step 5 — Remove Swap
+
+```bash
+sudo swapoff /swapfile
+sudo rm /swapfile
+```
+
+---
+
+### Building on a Separate Machine
+
+This is the recommended approach if the Pi runs out of memory during generation. The database is platform-independent — a file generated on a laptop works identically on the Pi.
+
+#### macOS / Linux
+
+```bash
+# Install tetra3
+pip3 install git+https://github.com/esa/tetra3.git
+
+# Download the Hipparcos catalogue
+curl -k https://cdsarc.cds.unistra.fr/ftp/cats/I/239/hip_main.dat -o hip_main.dat
+
+# Move it into the tetra3 package directory where tetra3 expects to find it
+TETRA3_DIR=$(python3 -c "import tetra3, os; print(os.path.dirname(tetra3.__file__))")
+mv hip_main.dat "$TETRA3_DIR/"
+
+# Generate the database (2–5 minutes on a laptop)
+cd "$TETRA3_DIR"
+python3 -c "
+import tetra3
+t3 = tetra3.Tetra3(load_database=None)
+t3.generate_database(
+    max_fov=14,
+    min_fov=13,
+    star_max_magnitude=8.0,
+    save_as='t3_fov14_mag8',
+    star_catalog='hip_main',
+    pattern_stars_per_fov=10,
+    verification_stars_per_fov=30,
+)
+print('Done.')
+"
+```
+
+The output file `t3_fov14_mag8.npz` appears in the tetra3 package directory.
+
+#### Windows (PowerShell)
+
+```powershell
+# Install tetra3
+pip install git+https://github.com/esa/tetra3.git
+
+# Download the Hipparcos catalogue
+curl.exe -k https://cdsarc.cds.unistra.fr/ftp/cats/I/239/hip_main.dat -o hip_main.dat
+
+# Find the tetra3 package directory and move the catalogue there
+$tetra3dir = python -c "import tetra3, os; print(os.path.dirname(tetra3.__file__))"
+Move-Item hip_main.dat "$tetra3dir\"
+
+# Generate the database
+Set-Location $tetra3dir
+python -c "
+import tetra3
+t3 = tetra3.Tetra3(load_database=None)
+t3.generate_database(
+    max_fov=14,
+    min_fov=13,
+    star_max_magnitude=8.0,
+    save_as='t3_fov14_mag8',
+    star_catalog='hip_main',
+    pattern_stars_per_fov=10,
+    verification_stars_per_fov=30,
+)
+print('Done.')
+"
+```
+
+#### If pip install of tetra3 fails
+
+Install inside a virtual environment:
+
+```bash
+# macOS/Linux
+python3 -m venv tetra_env
+source tetra_env/bin/activate
+pip install git+https://github.com/esa/tetra3.git
+
+# Windows
+python -m venv tetra_env
+tetra_env\Scripts\activate
+pip install git+https://github.com/esa/tetra3.git
+```
+
+Then find the tetra3 package directory within the venv and proceed as above.
+
+#### Copy the Database to the Pi
+
+Once generation is complete, copy the database to the Pi and install it:
+
+```bash
+# From your laptop — copy to Pi home directory
+scp t3_fov14_mag8.npz efinder@192.168.50.1:~/
+
+# On the Pi — install into venv and repo bundle
+ssh efinder@192.168.50.1
+
+TETRA3_DATA=$(~/venv-efinder/bin/python3 -c \
+    "import tetra3, os; print(os.path.join(os.path.dirname(tetra3.__file__), 'data'))")
+cp ~/t3_fov14_mag8.npz "$TETRA3_DATA/"
+mkdir -p ~/eFinder_cli/Solver/databases
+cp ~/t3_fov14_mag8.npz ~/eFinder_cli/Solver/databases/
+
+sudo systemctl start efinder
+journalctl -u efinder -f
+```
+
+---
+
+### After Generation — Install the Database on the Pi
+
+If you generated on the Pi itself:
+
+```bash
+cp ~/tetra3/tetra3/t3_fov14_mag8.npz \
+   ~/venv-efinder/lib/python3.11/site-packages/tetra3/data/
+```
+
+> **Note:** If your Python version is not 3.11, find the correct path with:
+> ```bash
+> ~/venv-efinder/bin/python3 -c "import tetra3, os; print(os.path.join(os.path.dirname(tetra3.__file__), 'data'))"
+> ```
+
+### Update eFinder.py if Using a Different Database Name
+
+If you generated a database with a different name (e.g. `t3_fov20_mag8` for a wider lens), update the database name in `eFinder.py`:
+
+```bash
+nano ~/Solver/eFinder.py
+```
+
+Find and change:
+
+```python
+t3 = tetra3.Tetra3('t3_fov14_mag8')
+```
+
+Also update the camera FOV constants to match your new lens:
+
+```python
+# (width_px, height_px, arcsec/px, fov_deg)
+cam = (960, 760, 50.8, 13.5)
+```
+
+The `arcsec/px` value is `(fov_deg * 3600) / width_px`. For a 20° FOV: `(20 * 3600) / 960 = 75.0`.
+
+### Restart and Verify
+
+```bash
+sudo systemctl start efinder
+journalctl -u efinder -f
+```
+
+Check the log page at `http://192.168.50.1/log.php` once back in AP mode.
+
+### Full generate_database() Parameter Reference
+
+```python
+t3.generate_database(
+    max_fov,                        # REQUIRED — maximum FOV in degrees
+    min_fov=None,                   # Default: same as max_fov (single-scale)
+    save_as=None,                   # Default: None (don't save to disk)
+    star_catalog='hip_main',        # 'hip_main', 'tyc_main', or 'bsc5'
+    pattern_stars_per_fov=10,       # Stars used for pattern matching per FOV region
+    verification_stars_per_fov=30,  # Stars used for solution verification per FOV region
+    star_max_magnitude=7,           # Dimmest stars to include (default 7, use 8 for IMX477)
+    pattern_max_error=0.005,        # Pattern bin precision — leave at default
+    simplify_pattern=False,         # Leave at default
+    range_ra=None,                  # None = whole sky
+    range_dec=None,                 # None = whole sky
+    presort_patterns=True,          # Leave at default
+    save_largest_edge=False,        # Leave at default
+    multiscale_step=1.5,            # FOV ratio between scales for multiscale databases
+)
+```
+
+**Key tradeoffs:**
+
+- **`min_fov` = `max_fov`** — single-scale database, smallest file, fastest solve, only works at one FOV
+- **`min_fov` much less than `max_fov`** — multiscale database, larger file, works across a range of FOVs
+- **Higher `star_max_magnitude`** — more stars, larger database, better performance in poor conditions
+- **Higher `pattern_stars_per_fov`** — more robust matching, larger database
+- **Higher `verification_stars_per_fov`** — more confident solutions, slightly slower
+
+### Saving the Database to Your GitHub Repo
+
+Once you have a working database, copy it to your laptop and add it to the `tinySS` branch so future installs are fully self-contained with no generation step:
+
+```bash
+# On your laptop — if generated on the Pi, copy it first
+scp efinder@192.168.50.1:~/tetra3/tetra3/t3_fov14_mag8.npz .
+
+# Add to the repo
+mkdir -p /path/to/eFinder_cli/Solver/databases
+cp t3_fov14_mag8.npz /path/to/eFinder_cli/Solver/databases/
+cd /path/to/eFinder_cli
+git add Solver/databases/t3_fov14_mag8.npz
+git commit -m "Add t3_fov14_mag8 database for IMX477 at 25mm"
+git push origin tinySS
+```
+
+The install script copies all `.npz` files from `Solver/databases/` into the venv data directory automatically. If you add databases for additional lenses, all of them will be installed and available.
+
+---
+
 ## File Layout on the Pi
 
 ```
 /home/efinder/
 ├── venv-efinder/          Python virtual environment
-├── tetra3/                Tetra3 source
-├── eFinder_cli/           Repository clone (tinySS branch)
+├── tetra3/                Tetra3 source (library only — databases come from repo)
+├── eFinder_cli/           Repository bundle (tinySS branch)
 ├── uploads/               OTA update zip drop location
 ├── station.sh             Switch to home network (run from serial console)
 └── Solver/
@@ -771,7 +1066,9 @@ Or install **netcat for Windows** via winget: `winget install netcat` and use th
     ├── test.npy           Test image for test mode (northern hemisphere)
     ├── images/            Debug capture output (tmpfs — cleared on reboot)
     ├── default_hotspot.txt  AP SSID and password
-    └── www/               Web UI files for OTA updater
+    ├── databases/         Tetra3 pattern databases (copied to venv at install)
+    │   └── t3_fov14_mag8.npz
+    └── www/               Web UI files
         ├── log.php        Live log viewer (http://192.168.50.1/log.php)
         └── README.md      This documentation (http://192.168.50.1/README.md)
 ```
