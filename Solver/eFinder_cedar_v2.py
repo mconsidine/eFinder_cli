@@ -260,13 +260,34 @@ cam = (960, 760, 50.8, 13.5)
 
 # ---------------------------------------------------------------------------
 # Camera and cedar-solve initialisation
+# Load database first — camera initialised after to avoid V4L2 dequeue
+# timeout if the database takes significant time to load.
 # ---------------------------------------------------------------------------
-camera = Camera()
-camera.set(float(param.get("Exposure", "0.1")), param.get("Gain", "10"))
-
 print('Loading cedar-solve database...')
-t3 = tetra3.Tetra3('cedar_database')
-print('cedar-solve ready')
+try:
+    t3 = tetra3.Tetra3('cedar_database')
+    databaseReady = True
+    print('cedar-solve ready')
+except FileNotFoundError:
+    print('ERROR: cedar_database.npz not found.')
+    print('       Check that the database was generated during the image build.')
+    t3 = None
+    databaseReady = False
+except Exception as e:
+    print('ERROR: cedar-solve database load failed:', e)
+    t3 = None
+    databaseReady = False
+
+try:
+    camera = Camera()
+    camera.set(float(param.get("Exposure", "0.1")), param.get("Gain", "10"))
+    cameraReady = True
+    print('Camera ready')
+except Exception as e:
+    print('ERROR: Camera initialisation failed:', e)
+    print('       Check camera cable and dtoverlay=imx477 in /boot/firmware/config.txt')
+    camera = None
+    cameraReady = False
 
 pix_x, pix_y = (
     float(param.get("d_x", "0")) / 60,
@@ -379,6 +400,12 @@ def saveImage(array, txt):
 # Continuous solve loop
 # ---------------------------------------------------------------------------
 def loop_solve():
+    if not cameraReady:
+        print('Solve loop not started — no camera.')
+        return
+    if not databaseReady:
+        print('Solve loop not started — database not loaded.')
+        return
     while True:
         if not offset_flag:
             capture()
@@ -417,6 +444,8 @@ def setExp(a):
     return '1'
 
 def getAutoExp():
+    if not cameraReady:
+        return str(param.get('Exposure', '0.1'))
     expAuto = float(param['Exposure'])
     camera.set(expAuto, param['Gain'])
     np_image = capture()
@@ -442,6 +471,8 @@ def getAutoExp():
 # ---------------------------------------------------------------------------
 def measure_offset():
     global offset_str, offset_flag, offset, param
+    if not cameraReady or not databaseReady:
+        return 'fail'
     offset_flag = True
     print("Started capture for offset")
     solveImage(capture())
@@ -478,6 +509,8 @@ def measure_offset():
     return name + secondname + ',HIP' + hipId + ',' + offset_str
 
 def go_solve():
+    if not cameraReady or not databaseReady:
+        return '0'
     solveImage(capture())
     return '1' if solve else '0'
 
@@ -671,7 +704,11 @@ def serveWifi():
 # Main
 # ---------------------------------------------------------------------------
 print('eFinder version', version)
+print('Camera  :', 'OK' if cameraReady   else 'NOT AVAILABLE — solve loop disabled')
+print('Database:', 'OK' if databaseReady else 'NOT FOUND — solve loop disabled')
+print('Accel   :', 'OK' if altAngle      else 'not fitted')
 print('cedar-detect server expected at', CEDAR_DETECT_ADDR)
+print('')
 print('Starting solve loop...')
 solveloop = Thread(target=loop_solve, daemon=True)
 solveloop.start()
