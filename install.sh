@@ -274,6 +274,7 @@ echo "[8/9] Configuring Apache/PHP web server..."
 
 # Deploy PHP application files from repo bundle
 sudo cp "$REPO_DIR/Solver/www/index.php"    /var/www/html/
+sudo cp "$REPO_DIR/Solver/www/stream.php"   /var/www/html/
 sudo cp "$REPO_DIR/Solver/www/upload.php"   /var/www/html/
 sudo cp "$REPO_DIR/Solver/www/updater.html" /var/www/html/
 sudo cp "$REPO_DIR/Solver/www/user.ini"     /etc/php/8.2/apache2/conf.d/
@@ -285,6 +286,12 @@ sudo cp "$REPO_DIR/README.md" /var/www/html/README.md
 
 # Allow Apache (www-data) to read the systemd journal so log.php works
 sudo usermod -a -G systemd-journal www-data
+
+# Install Apache config to extend timeout for MJPEG stream.
+# Without this Apache kills the stream.php connection after 60 seconds.
+sudo cp "$REPO_DIR/Solver/www/efinder.conf" \
+    /etc/apache2/conf-available/efinder.conf
+sudo a2enconf efinder
 
 # Move default Apache index out of the way (only once)
 [ -f /var/www/html/index.html ] && sudo mv /var/www/html/index.html /var/www/html/apacheindex.html
