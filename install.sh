@@ -135,9 +135,13 @@ fi
 # ---------------------------------------------------------------------------
 echo ""
 echo "[3/9] Setting up Python virtual environment..."
-# Create venv if not already present — safe to run without internet
-if [ ! -d "$VENV" ]; then
+# Recreate if missing OR if pip binary is absent (broken/partial venv from reset)
+if [ ! -f "$VENV/bin/pip" ]; then
+    echo "  Creating venv..."
+    sudo rm -rf "$VENV"   # remove any partial remnant
     sudo -u "$EFINDER_USER" python3 -m venv "$VENV" --system-site-packages
+else
+    echo "  Venv already present and functional."
 fi
 
 if [ "$HAVE_INTERNET" = true ]; then
@@ -205,7 +209,8 @@ grep -q "$EFINDER_HOME/Solver/images" /etc/fstab || \
     echo "tmpfs $EFINDER_HOME/Solver/images tmpfs nodev,nosuid,size=10M 0 0" | \
     sudo tee -a /etc/fstab > /dev/null
 
-sudo mount -a   # activate without requiring a reboot
+sudo systemctl daemon-reload   # pick up fstab changes before mount -a
+sudo mount -a
 
 # ---------------------------------------------------------------------------
 # 5. Install Tetra3 star-pattern matching library
