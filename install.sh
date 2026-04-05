@@ -22,6 +22,11 @@ INSTALL_MARKER="$EFINDER_HOME/.efinder_installed"
 # and I2C is not enabled. The app handles absence gracefully at runtime.
 USE_ACCELEROMETER=false
 
+# Set to true to run apt upgrade after apt update.
+# On a freshly burned image this adds 5-15 minutes and is rarely necessary.
+# The base Bookworm image is already recent enough for all dependencies.
+UPGRADE_PACKAGES=false
+
 # =============================================================================
 
 # ---------------------------------------------------------------------------
@@ -79,9 +84,15 @@ fi
 # ---------------------------------------------------------------------------
 echo ""
 if [ "$HAVE_INTERNET" = true ]; then
-    echo "[1/9] Updating system packages..."
+    echo "[1/9] Updating package index..."
     sudo apt update
-    sudo apt upgrade -y
+
+    if [ "$UPGRADE_PACKAGES" = true ]; then
+        echo "  Upgrading all packages (this takes 5-15 minutes)..."
+        sudo apt upgrade -y
+    else
+        echo "  Skipping full upgrade (set UPGRADE_PACKAGES=true to enable)."
+    fi
 
     echo ""
     echo "[2/9] Installing required packages..."
@@ -120,7 +131,6 @@ if [ ! -d "$VENV" ]; then
 fi
 
 if [ "$HAVE_INTERNET" = true ]; then
-    "$VENV/bin/pip" install --upgrade pip
     if [ "$USE_ACCELEROMETER" = true ]; then
         echo "  Installing accelerometer Python package..."
         "$VENV/bin/pip" install adafruit-circuitpython-adxl34x
@@ -193,23 +203,22 @@ sudo mount -a   # activate without requiring a reboot
 echo ""
 echo "[6/9] Installing Tetra3..."
 if [ "$HAVE_INTERNET" = true ]; then
-    # Clone into tetra3_source — keeps source separate from the installed package
-    # and prevents Python from shadowing the venv installation with the source tree.
+    # Shallow clone — only latest commit, no history. Saves 30-60 seconds.
     if [ ! -d "$EFINDER_HOME/tetra3_source" ]; then
-        sudo -u "$EFINDER_USER" git clone https://github.com/esa/tetra3.git \
+        sudo -u "$EFINDER_USER" git clone --depth 1 \
+            https://github.com/esa/tetra3.git \
             "$EFINDER_HOME/tetra3_source"
     fi
     cd "$EFINDER_HOME/tetra3_source"
-    # Only install if not already correctly installed in the venv.
-    # --force-reinstall requires internet to fetch build dependencies even
-    # when the source is local, so avoid it on re-runs.
+    # --no-build-isolation skips downloading build dependencies (setuptools etc.)
+    # since they are already available in the system Python environment.
     if ! "$VENV/bin/python3" -c "
 import tetra3, os
 path = tetra3.__file__
 assert 'venv-efinder' in path, 'tetra3 not in venv'
 " 2>/dev/null; then
         echo "  Installing tetra3 into venv..."
-        "$VENV/bin/pip" install .
+        "$VENV/bin/pip" install --no-build-isolation .
     else
         echo "  Tetra3 already correctly installed in venv — skipping."
     fi
