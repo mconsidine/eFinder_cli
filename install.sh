@@ -513,9 +513,9 @@ if [ ! -f "$SUDOERS_FILE" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Helper script: station.sh
-# Switches from AP mode to home network (station mode) in one command.
-# Intended to be run from the USB serial console when SSH is unavailable.
+# Helper scripts
+# station.sh — switch to home network (station mode)
+# ap.sh      — switch back to AP mode (with reboot)
 # ---------------------------------------------------------------------------
 sudo tee "$EFINDER_HOME/station.sh" > /dev/null <<'EOF'
 #!/bin/bash
@@ -527,12 +527,29 @@ echo "Done. Check your router for the Pi's IP address, or try:"
 echo "  ssh efinder@efinder.local"
 echo ""
 echo "To return to AP mode after you are done:"
-echo "  sudo nmcli connection modify preconfigured autoconnect no"
-echo "  sudo reboot now"
+echo "  bash ~/ap.sh"
 EOF
 sudo chown "$EFINDER_USER:$EFINDER_USER" "$EFINDER_HOME/station.sh"
 sudo chmod 755 "$EFINDER_HOME/station.sh"
 echo "  station.sh installed at $EFINDER_HOME/station.sh"
+
+# Deploy ap.sh from the repo bundle
+if [ -f "$REPO_DIR/ap.sh" ]; then
+    sudo install -m 755 -o "$EFINDER_USER" -g "$EFINDER_USER" \
+        "$REPO_DIR/ap.sh" "$EFINDER_HOME/ap.sh"
+    echo "  ap.sh installed at $EFINDER_HOME/ap.sh"
+else
+    echo "  WARNING: ap.sh not found in repo bundle — skipping."
+fi
+
+# Deploy reset.sh from the repo bundle
+if [ -f "$REPO_DIR/reset.sh" ]; then
+    sudo install -m 755 -o "$EFINDER_USER" -g "$EFINDER_USER" \
+        "$REPO_DIR/reset.sh" "$EFINDER_HOME/reset.sh"
+    echo "  reset.sh installed at $EFINDER_HOME/reset.sh"
+else
+    echo "  WARNING: reset.sh not found in repo bundle — skipping."
+fi
 
 # ---------------------------------------------------------------------------
 # 13. systemd service: efinder-update (OTA zip updater, runs before main app)
