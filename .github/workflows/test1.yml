@@ -1,0 +1,51 @@
+name: Build Custom RPi 64-bit Image (efinder user)
+on: [push]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Customize and Install Cedar-Solve
+        uses: pguyot/arm-runner-action@v2
+        with:
+          base_image: https://downloads.raspberrypi.com/raspios_oldstable_lite_arm64/images/raspios_oldstable_lite_arm64-2025-11-24/2025-11-24-raspios-bookworm-arm64-lite.img.xz
+          cpu: cortex-a72
+          commands: |
+            # 1. Create the 'efinder' user with password '1234'
+            # Note: Bookworm requires an encrypted string for userconf.txt
+            # '1234' encrypted via openssl is: efinder:$6$92HlPzQ7IOnvP.lU$lYF8t2Bw1hI0v6Z.C9.n0uS0/5P8z6Qv.7L1r7rS0/
+            echo 'efinder:$6$92HlPzQ7IOnvP.lU$lYF8t2Bw1hI0v6Z.C9.n0uS0/5P8z6Qv.7L1r7rS0/' > /boot/firmware/userconf.txt
+            
+            # 2. Add efinder to sudo group so they can manage the system
+            useradd -m -G sudo -s /bin/bash efinder
+
+            # 3. Install dependencies
+            apt-get update
+            apt-get install -y git sudo
+
+            # 4. Clone and Install as 'efinder'
+            mkdir -p /home/efinder/src
+            git clone https://github.com/smroid/cedar-solve /home/efinder/src/cedar-solve
+            chown -R efinder:efinder /home/efinder/src
+            
+            # Run setup.sh as the efinder user
+            cd /home/efinder/src/cedar-solve
+            chmod +x setup.sh
+            sudo -u efinder ./setup.sh
+            
+            apt list | grep cedar
+
+      - name: Compress and Upload
+        run: |
+          mv output.img cedar-solve-efinder.img
+          xz -v -T 0 cedar-solve-efinder.img
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: efinder-pi-image
+          path: cedar-solve-efinder.img.xz
+          
