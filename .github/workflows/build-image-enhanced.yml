@@ -51,7 +51,7 @@ jobs:
           echo "LOOP=$LOOP" >> $GITHUB_ENV
 
           sudo parted $LOOP resizepart 2 100%
-          sudo e2fsck -f ${LOOP}p2
+          sudo e2fsck -fp ${LOOP}p2
           sudo resize2fs ${LOOP}p2
 
           sudo mkdir -p /mnt/rpi
