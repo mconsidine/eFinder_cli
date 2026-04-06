@@ -39,16 +39,17 @@ apt-get install -y --no-install-recommends\
     build-essential cmake pkg-config \
     libcfitsio-dev libssl-dev
 
+echo "Installing rust/cargo
 set -e
 
-echo "Installing Rust via rustup..."
 curl https://sh.rustup.rs -sSf | sh -s -- -y
-
-export PATH="$HOME/.cargo/bin:$PATH"
 . "$HOME/.cargo/env"
 
-echo "Rust version:"
-rustc --version
+# GitHub Actions compatibility (safe on normal Linux too)
+if [ -n "$GITHUB_PATH" ]; then
+    echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+fi
+
 cargo --version
 
 
