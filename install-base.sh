@@ -30,7 +30,7 @@ apt-get update
 
 echo ""
 echo "[2/4] Installing base packages..."
-apt-get install -y \
+apt-get install -y --no-install-recommends\
     git curl wget unzip \
     python3-pip python3-venv \
     python3-pil python3-smbus python3-picamera2 python3-scipy \

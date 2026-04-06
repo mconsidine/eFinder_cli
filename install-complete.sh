@@ -154,6 +154,16 @@ else
     exit 1
 fi
 
+echo "Performing final image slimming..."
+# Remove build-time dependencies
+apt-get purge -y rustc cargo build-essential cmake pkg-config libssl-dev
+# Remove packages orphaned by the purge
+apt-get autoremove -y
+# Clear out the local repository of retrieved package files
+apt-get clean
+# Remove man pages and documentation (optional, but saves space)
+rm -rf /usr/share/doc/* /usr/share/man/* /usr/share/info/*
+
 # Installation complete
 echo ""
 echo "============================================================================="

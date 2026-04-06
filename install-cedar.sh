@@ -134,6 +134,10 @@ chown -R efinder:efinder "$DATABASE_DIR"
 cd /
 rm -rf "$CEDAR_DIR"
 
+apt-get purge -y rustc cargo build-essential cmake pkg-config
+apt-get autoremove -y
+apt-get clean
+
 echo ""
 echo "============================================================================="
 echo " Cedar-solve installation complete"
