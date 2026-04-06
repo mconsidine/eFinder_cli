@@ -52,7 +52,10 @@ jobs:
 
       - name: Copy install script into image
         run: |
-          sudo cp install-complete.sh /mnt/rpi/root/
+          #sudo cp install-complete.sh /mnt/rpi/root/
+          ls ..
+          sudo cp -r . /mnt/rpi/root/
+          ls -la
 
       - name: Prepare chroot
         run: |
