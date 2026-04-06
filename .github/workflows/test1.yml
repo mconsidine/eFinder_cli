@@ -1,5 +1,6 @@
 name: Build Custom RPi 64-bit Image (efinder user)
-on: [push]
+on:
+  workflow_dispatch:
 
 jobs:
   build:
