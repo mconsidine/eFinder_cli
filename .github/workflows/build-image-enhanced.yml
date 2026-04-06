@@ -27,7 +27,9 @@ jobs:
       - name: Download Pi OS
         run: |
           wget https://downloads.raspberrypi.org/raspios_oldstable_lite_arm64/images/raspios_oldstable_lite_arm64-2025-11-24/2025-11-24-raspios-bookworm-arm64-lite.img.xz
-          unxz 2025-11-24-raspios-bookworm-arm64-lite.img.xz
+          unxz -k 2025-11-24-raspios-bookworm-arm64-lite.img.xz
+          ls ..
+          ls -la
       
       - name: Run installation in ARM environment
         uses: pguyot/arm-runner-action@v2
@@ -42,6 +44,8 @@ jobs:
             export NON_INTERACTIVE=1
             
             # Run installation phases
+            ls ..
+            ls -la
             bash install-complete.sh
       
       - name: Compress image
