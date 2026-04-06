@@ -338,6 +338,9 @@ jobs:
           # the script sets the working directory to /home/efinder/.
           # Runs under QEMU aarch64 — expect 10-20 minutes on the runner.
           # ------------------------------------------------------------------
+          $CHROOT ls -la /mnt/pi/home/efinder
+          $CHROOT sudo cp /mnt/pi/home/efinder/hip_main.dat \
+            /home/efinder/venv-efinder/lib/python3.11/site-packages/tetra3/hip_main.dat
           $CHROOT su -s /bin/bash efinder -c \
             "cd /home/efinder && \
              /home/efinder/venv-efinder/bin/python3 /home/efinder/generate_database.py"
