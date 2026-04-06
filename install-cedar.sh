@@ -62,6 +62,13 @@ echo "File structure after cedar-detect clone"
 ls ..
 ls -la
 echo $PATH
+. "$HOME/.cargo/env"
+
+echo"Paths :"
+echo $PATH
+echo $HOME
+echo $GITHUB_PATH
+echo ""
 
 # Build in release mode for production performance
 cargo build --release
