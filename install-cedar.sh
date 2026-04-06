@@ -37,6 +37,11 @@ if [ -d "$CEDAR_DIR" ]; then
     rm -rf "$CEDAR_DIR"
 fi
 
+echo "File structure before cedar-solve clone"
+ls ..
+ls -la
+echo $PATH
+
 git clone --depth 1 https://github.com/smroid/cedar-solve.git "$CEDAR_DIR"
 cd "$CEDAR_DIR"
 
@@ -44,9 +49,19 @@ echo ""
 echo "[2/5] Building cedar-detect-server (Rust binary)..."
 echo "  This may take 10-20 minutes on Pi Zero 2W..."
 
+echo "File structure before cedar-detect clone"
+ls ..
+ls -la
+echo $PATH
+
 git clone --depth 1 https://github.com/smroid/cedar-detect.git cedar-detect-server
 
 cd cedar-detect-server
+
+echo "File structure after cedar-detect clone"
+ls ..
+ls -la
+echo $PATH
 
 # Build in release mode for production performance
 cargo build --release
