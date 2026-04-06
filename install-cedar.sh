@@ -3,20 +3,22 @@
 # install-cedar.sh — Phase 2: Cedar-solve Compilation & Installation
 # 
 # Compiles cedar-detect-server from Rust source and installs cedar-solve
-# Python package. Generates the star pattern database.
+# Python package from source. Generates the star pattern database.
 #
 # Usage:
 #   sudo bash install-cedar.sh
 #
-# Prerequisites:
-#   - Rust toolchain (cargo, rustc)
+# Prerequisites (supplied by install-base.sh):
+#   - Rust toolchain (cargo, rustc) via rustup
+#   - protobuf-compiler (protoc) — required by cedar-detect build.rs
 #   - Python 3 with pip
 #   - Build tools (gcc, cmake, pkg-config)
 # =============================================================================
 set -eo pipefail
 
 EFINDER_HOME=/home/efinder
-CEDAR_DIR=/tmp/cedar-solve
+CEDAR_SOLVE_DIR=/tmp/cedar-solve
+CEDAR_DETECT_DIR=/tmp/cedar-detect
 DATABASE_DIR="$EFINDER_HOME/Solver/databases"
 
 echo "============================================================================="
@@ -29,78 +31,76 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
+# ---------------------------------------------------------------------------
+# Ensure cargo and protoc are on PATH.
+# rustup installs to $HOME/.cargo; under sudo $HOME is /root.
+# We also explicitly include /usr/bin so protoc is always visible regardless
+# of the sudoers secure_path setting.
+# ---------------------------------------------------------------------------
+. "$HOME/.cargo/env"
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$HOME/.cargo/bin"
+
+echo "Build environment:"
+echo "  PATH : $PATH"
+echo "  cargo: $(cargo --version)"
+echo "  protoc: $(protoc --version)"
+
 echo ""
-echo "[1/5] Cloning cedar-solve repository..."
+echo "[1/5] Cloning cedar-detect repository..."
 
 # Clean any existing clone
-if [ -d "$CEDAR_DIR" ]; then
-    rm -rf "$CEDAR_DIR"
+if [ -d "$CEDAR_DETECT_DIR" ]; then
+    rm -rf "$CEDAR_DETECT_DIR"
 fi
 
-echo "File structure before cedar-solve clone"
-ls ..
-ls -la
-echo $PATH
-
-git clone --depth 1 https://github.com/smroid/cedar-solve.git "$CEDAR_DIR"
-cd "$CEDAR_DIR"
+git clone --depth 1 https://github.com/smroid/cedar-detect.git "$CEDAR_DETECT_DIR"
 
 echo ""
 echo "[2/5] Building cedar-detect-server (Rust binary)..."
 echo "  This may take 10-20 minutes on Pi Zero 2W..."
 
-echo "File structure before cedar-detect clone"
-ls ..
+# The cedar-detect repo contains a workspace; the gRPC server crate lives in
+# the cedar-detect-server/ subdirectory.
+cd "$CEDAR_DETECT_DIR/cedar-detect-server"
+
+echo "Working directory: $(pwd)"
+echo "Contents:"
 ls -la
-echo "PATH :"
-echo $PATH
-echo "-----"
-
-git clone --depth 1 https://github.com/smroid/cedar-detect.git cedar-detect-server
-
-cd cedar-detect-server
-
-echo "File structure after cedar-detect clone"
-ls ..
-ls -la
-echo "PATH :"
-echo $PATH
-echo "----------"
-. "$HOME/.cargo/env"
-
-echo "Paths :"
-echo $PATH
-echo $HOME
-echo $GITHUB_PATH
-echo "---------------"
-echo ""
 
 # Build in release mode for production performance
 cargo build --release
 
 # Verify binary was built
-if [ ! -f target/release/cedar-detect-server ]; then
+BINARY="$CEDAR_DETECT_DIR/cedar-detect-server/target/release/cedar-detect-server"
+if [ ! -f "$BINARY" ]; then
     echo "ERROR: cedar-detect-server binary not found after build"
+    echo "Expected: $BINARY"
     exit 1
 fi
 
 # Install to system path
-install -m 755 target/release/cedar-detect-server /usr/local/bin/
+install -m 755 "$BINARY" /usr/local/bin/cedar-detect-server
 echo "  Installed: /usr/local/bin/cedar-detect-server"
 
 # Verify installation
 if command -v cedar-detect-server > /dev/null 2>&1; then
     echo "  ✓ cedar-detect-server is available in PATH"
-    cedar-detect-server --version 2>/dev/null || echo "  (version info not available)"
+    cedar-detect-server --version 2>/dev/null || echo "  (version flag not supported — binary is present)"
 else
     echo "ERROR: cedar-detect-server not found in PATH after installation"
     exit 1
 fi
 
 echo ""
-echo "[3/5] Installing cedar-solve Python package..."
+echo "[3/5] Cloning and installing cedar-solve Python package from source..."
 
-cd "$CEDAR_DIR"
+# Clean any existing clone
+if [ -d "$CEDAR_SOLVE_DIR" ]; then
+    rm -rf "$CEDAR_SOLVE_DIR"
+fi
+
+git clone --depth 1 https://github.com/smroid/cedar-solve.git "$CEDAR_SOLVE_DIR"
+cd "$CEDAR_SOLVE_DIR"
 
 # Install with --break-system-packages for Bookworm externally-managed Python
 pip3 install --break-system-packages .
@@ -136,8 +136,8 @@ echo "  Catalog stars per FOV: 200"
 echo ""
 echo "  This may take 5-15 minutes..."
 
-# Generate database using the Python module's CLI tool
-# Database will be created in current directory as default_database.npz
+# Generate database using the Python module's CLI tool.
+# Database is written to the current directory as default_database.npz.
 python3 -m cedar_solve.generate_database \
     --hipparcos-path hip_main.dat \
     --max-fov 15 \
@@ -159,18 +159,18 @@ rm -f hip_main.dat
 # Set ownership
 chown -R efinder:efinder "$DATABASE_DIR"
 
-# Clean up source directory
+# Clean up source directories
 cd /
-rm -rf "$CEDAR_DIR"
+rm -rf "$CEDAR_SOLVE_DIR"
+rm -rf "$CEDAR_DETECT_DIR"
 
-apt-get purge -y rustc cargo build-essential cmake pkg-config
-apt-get autoremove -y
-apt-get clean
+# NOTE: build tool purge (rustc, cargo, build-essential, etc.) is intentionally
+# left to install-complete.sh so nothing in Phase 3 is broken by an early purge.
 
 echo ""
 echo "============================================================================="
 echo " Cedar-solve installation complete"
-echo "  Binary: $(which cedar-detect-server)"
-echo "  Python module: cedar_solve"
+echo "  Binary  : $(which cedar-detect-server)"
+echo "  Python  : cedar_solve module installed"
 echo "  Database: $DATABASE_DIR/default_database.npz"
 echo "============================================================================="

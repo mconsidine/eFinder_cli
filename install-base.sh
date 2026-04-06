@@ -30,14 +30,15 @@ apt-get update
 
 echo ""
 echo "[2/4] Installing base packages..."
-apt-get install -y --no-install-recommends\
+apt-get install -y --no-install-recommends \
     git curl wget unzip \
     python3-pip python3-venv \
     python3-pil python3-smbus python3-picamera2 python3-scipy \
     samba samba-common-bin \
     apache2 php8.2 libapache2-mod-php8.2 \
     build-essential cmake pkg-config \
-    libcfitsio-dev libssl-dev
+    libcfitsio-dev libssl-dev \
+    protobuf-compiler
 
 echo "Installing rust/cargo"
 set -e
