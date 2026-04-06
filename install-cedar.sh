@@ -44,6 +44,8 @@ echo ""
 echo "[2/5] Building cedar-detect-server (Rust binary)..."
 echo "  This may take 10-20 minutes on Pi Zero 2W..."
 
+git clone --depth 1 https://github.com/smroid/cedar-detect.git cedar-detect-server
+
 cd cedar-detect-server
 
 # Build in release mode for production performance
