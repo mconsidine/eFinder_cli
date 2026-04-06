@@ -1,9 +1,9 @@
 name: v3 Build eFinder RPi Image v2 — Cedar edition (offline)
 
 on:
-  push:
-    branches:
-      tiny_cedar_v2
+  #push:
+  #  branches:
+  #    tiny_cedar_v2
   workflow_dispatch:
 
 jobs:
@@ -331,9 +331,8 @@ jobs:
           $CHROOT mkdir -p /home/efinder/src
           $CHROOT git clone https://github.com/smroid/cedar-solve \
             /home/efinder/src/cedar-solve
-          $CHROOT cd /home/efinder/src/cedar-solve
-          $CHROOT chmod +x setup.sh
-          $CHROOT ./setup.sh
+          $CHROOT chmod +x /home/efinder/src/cedar-solve/setup.sh
+          $CHROOT /home/efinder/src/cedar-solve/setup.sh
           $CHROOT chown -R efinder:efinder
           $CHROOT apt list | grep cedar
             
