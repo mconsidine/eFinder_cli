@@ -31,7 +31,7 @@ jobs:
             qemu-user-static \
             binfmt-support \
             parted \
-            losetup \
+            util-linux \
             kpartx
 
       - name: Download Pi OS
