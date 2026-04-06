@@ -346,7 +346,7 @@ jobs:
             /home/efinder/venv-efinder/lib/python3.11/site-packages/tetra3/hip_main.dat
           $CHROOT su -s /bin/bash efinder -c \
             "cd /home/efinder && \
-             /home/efinder/venv-efinder/bin/python3 /home/efinder/generate_database.py"
+             sudo /home/efinder/venv-efinder/bin/python3 /home/efinder/generate_database.py"
 
           # Clean up the catalogue and generation script — not needed at runtime.
           sudo rm -f /mnt/pi/home/efinder/generate_database.py
