@@ -18,7 +18,8 @@ while (ob_get_level() > 0) {
     ob_end_clean();
 }
 
-while (true) {
+//while (true) {
+for ($frame_count = 0; $frame_count < 1000; $frame_count++) {
     if (file_exists($image)) {
         $data = @file_get_contents($image);
         if ($data !== false && strlen($data) > 0) {
