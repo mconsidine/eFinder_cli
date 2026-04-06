@@ -37,8 +37,20 @@ apt-get install -y --no-install-recommends\
     samba samba-common-bin \
     apache2 php8.2 libapache2-mod-php8.2 \
     build-essential cmake pkg-config \
-    libcfitsio-dev libssl-dev \
-    rustc cargo
+    libcfitsio-dev libssl-dev
+
+set -e
+
+echo "Installing Rust via rustup..."
+curl https://sh.rustup.rs -sSf | sh -s -- -y
+
+export PATH="$HOME/.cargo/bin:$PATH"
+. "$HOME/.cargo/env"
+
+echo "Rust version:"
+rustc --version
+cargo --version
+
 
 # Optional: full system upgrade (commented out for speed in automated builds)
 # apt-get upgrade -y
