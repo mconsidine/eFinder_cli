@@ -32,16 +32,19 @@ jobs:
 
           ls ..
           ls -la
-          
-      - name: Set up QEMU
+
+      - name: Set up QEMU (clean)
         run: |
           sudo apt-get update
           sudo apt-get install -y qemu-user-static binfmt-support
-          sudo update-binfmts --enable
+          sudo update-binfmts --enable qemu-arm
+          sudo update-binfmts --enable qemu-aarch64
 
       - name: Run installation in ARM environment
         uses: pguyot/arm-runner-action@v2
         with:
+          debug: yes
+          setup_binfmt: no
           base_image: ./2025-11-24-raspios-bookworm-arm64-lite.img
           cpu: cortex-a53
           commands: |
