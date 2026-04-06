@@ -40,6 +40,10 @@ jobs:
           unxz 2025-11-24-raspios-bookworm-arm64-lite.img.xz
           test -f 2025-11-24-raspios-bookworm-arm64-lite.img
 
+      - name: Expand image file
+        run: |
+          truncate -s +4G 2025-11-24-raspios-bookworm-arm64-lite.img
+
       - name: Mount image
         run: |
           sudo losetup -Pf 2025-11-24-raspios-bookworm-arm64-lite.img
@@ -49,6 +53,17 @@ jobs:
 
           sudo mkdir -p /mnt/rpi
           sudo mount ${LOOP}p2 /mnt/rpi
+
+      - name: Expand root filesystem
+        run: |
+          LOOP=$(losetup -j 2025-11-24-raspios-bookworm-arm64-lite.img | cut -d: -f1)
+
+          # Grow partition 2 to fill disk
+          sudo parted $LOOP resizepart 2 100%
+
+          # Resize filesystem
+          sudo e2fsck -f ${LOOP}p2
+          sudo resize2fs ${LOOP}p2
 
       - name: Copy install script into image
         run: |
