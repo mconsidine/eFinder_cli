@@ -51,6 +51,7 @@ jobs:
           echo "LOOP=$LOOP" >> $GITHUB_ENV
 
           sudo parted $LOOP resizepart 2 100%
+          sudo udevadm settle
           sudo e2fsck -fp ${LOOP}p2
           sudo resize2fs ${LOOP}p2
 
