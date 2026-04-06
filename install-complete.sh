@@ -28,7 +28,10 @@
 set -eo pipefail
 
 NON_INTERACTIVE=false
-[[ "$1" == "--non-interactive" ]] && NON_INTERACTIVE=true
+
+if [[ "$1" == "--non-interactive" ]] || [[ "$NON_INTERACTIVE" == "1" ]]; then
+    NON_INTERACTIVE=true
+fi
 
 # Base URL for downloading phase scripts if not present locally
 GITHUB_RAW_BASE="https://raw.githubusercontent.com/mconsidine/eFinder_cli/tinySS"
@@ -177,5 +180,10 @@ if [ "$NON_INTERACTIVE" = false ]; then
 else
     echo "Rebooting in 5 seconds (non-interactive mode)..."
     sleep 5
-    reboot
+    if command -v systemctl >/dev/null 2>&1; then
+      systemctl reboot || true
+    else
+      echo "Reboot skipped (no systemd environment)"
+fi
+
 fi
