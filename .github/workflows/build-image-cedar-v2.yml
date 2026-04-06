@@ -301,7 +301,8 @@ jobs:
             libtiff-dev \
             libfreetype-dev \
             liblcms2-dev \
-            libwebp-dev
+            libwebp-dev \
+            git
 
           # ------------------------------------------------------------------
           # Python virtual environment.
