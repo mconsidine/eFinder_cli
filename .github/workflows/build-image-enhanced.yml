@@ -34,7 +34,7 @@ jobs:
       - name: Run installation in ARM environment
         uses: pguyot/arm-runner-action@v2
         with:
-          base_image: 2025-11-24-raspios-bookworm-arm64-lite.img
+          base_image: eFinder_cli/2025-11-24-raspios-bookworm-arm64-lite.img
           cpu: cortex-a53
           commands: |
             # Set environment variables
