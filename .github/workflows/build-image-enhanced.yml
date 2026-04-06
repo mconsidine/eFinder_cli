@@ -1,6 +1,9 @@
-name: Build eFinder Enhanced OS Image
+name: v4 Build eFinder Enhanced OS Image
 
 on:
+  push:
+    branches:
+      enhanced
   workflow_dispatch:
     inputs:
       pi_os_date:
