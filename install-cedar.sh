@@ -52,7 +52,9 @@ echo "  This may take 10-20 minutes on Pi Zero 2W..."
 echo "File structure before cedar-detect clone"
 ls ..
 ls -la
+echo "PATH :"
 echo $PATH
+echo "-----"
 
 git clone --depth 1 https://github.com/smroid/cedar-detect.git cedar-detect-server
 
@@ -61,13 +63,16 @@ cd cedar-detect-server
 echo "File structure after cedar-detect clone"
 ls ..
 ls -la
+echo "PATH :"
 echo $PATH
+echo "----------"
 . "$HOME/.cargo/env"
 
-echo"Paths :"
+echo "Paths :"
 echo $PATH
 echo $HOME
 echo $GITHUB_PATH
+echo "---------------"
 echo ""
 
 # Build in release mode for production performance
