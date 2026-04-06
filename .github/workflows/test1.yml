@@ -12,7 +12,6 @@ jobs:
         uses: pguyot/arm-runner-action@v2
         with:
           base_image: https://downloads.raspberrypi.com/raspios_oldstable_lite_arm64/images/raspios_oldstable_lite_arm64-2025-11-24/2025-11-24-raspios-bookworm-arm64-lite.img.xz
-          cpu: cortex-a72
           commands: |
             # 1. Create the 'efinder' user with password '1234'
             # Note: Bookworm requires an encrypted string for userconf.txt
