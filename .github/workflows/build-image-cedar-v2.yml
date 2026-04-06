@@ -267,9 +267,12 @@ jobs:
           sudo chmod +x /mnt/pi/usr/sbin/policy-rc.d
 
           # Create efinder user if not present in the base image.
-          $CHROOT id efinder &>/dev/null || \
-            $CHROOT adduser --disabled-password --gecos "" efinder
-
+          # $CHROOT id efinder &>/dev/null || \
+          $CHROOT adduser --disabled-password --gecos "" efinder
+            
+          # Add efinder to sudo group so they can manage the system
+          useradd -m -G sudo -s /bin/bash efinder
+            
           # ------------------------------------------------------------------
           # Package installation.
           # ------------------------------------------------------------------
@@ -323,13 +326,23 @@ jobs:
             --prefer-binary \
             Pillow
 
+          # 4. Clone and Install as 'efinder'
+          $CHROOT mkdir -p /home/efinder/src
+          $CHROOT git clone https://github.com/smroid/cedar-solve \
+            /home/efinder/src/cedar-solve
+          $CHROOT cd /home/efinder/src/cedar-solve
+          $CHROOT chmod +x setup.sh
+          $CHROOT ./setup.sh
+          $CHROOT chown -R efinder:efinder
+          $CHROOT apt list | grep cedar
+            
           # adafruit-circuitpython-adxl34x is intentionally not installed.
           # The accelerometer is disabled by default (USE_ACCELEROMETER = False
           # in eFinder_cedar_v2.py). To enable, install manually on the Pi:
           #   /home/efinder/venv-efinder/bin/pip install adafruit-circuitpython-adxl34x
           $CHROOT /home/efinder/venv-efinder/bin/pip install \
-            grpcio \
-            cedar-solve
+            grpcio
+          #  cedar-solve
 
           # Remove the build-time pip.conf so the venv uses system pip.conf
           # (with piwheels) on the real Pi at runtime.
@@ -346,7 +359,7 @@ jobs:
             /home/efinder/venv-efinder/lib/python3.11/site-packages/tetra3/hip_main.dat
           $CHROOT su -s /bin/bash efinder -c \
             "cd /home/efinder && \
-             sudo /home/efinder/venv-efinder/bin/python3 /home/efinder/generate_database.py"
+             /home/efinder/venv-efinder/bin/python3 /home/efinder/generate_database.py"
 
           # Clean up the catalogue and generation script — not needed at runtime.
           sudo rm -f /mnt/pi/home/efinder/generate_database.py
