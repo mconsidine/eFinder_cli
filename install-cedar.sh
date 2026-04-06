@@ -40,7 +40,7 @@ fi
 . "$HOME/.cargo/env"
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$HOME/.cargo/bin"
 
-echo "Build environment: "
+echo "Build environment:"
 echo "  PATH : $PATH"
 echo "  cargo: $(cargo --version)"
 echo "  protoc: $(protoc --version)"
@@ -59,19 +59,19 @@ echo ""
 echo "[2/5] Building cedar-detect-server (Rust binary)..."
 echo "  This may take 10-20 minutes on Pi Zero 2W..."
 
-# The cedar-detect repo contains a workspace; the gRPC server crate lives in
-# the cedar-detect-server/ subdirectory.
-cd "$CEDAR_DETECT_DIR/cedar-detect-server"
+# Build from the repo root; cedar-detect-server is a named binary target
+# in the workspace. The binary lands at target/release/cedar-detect-server.
+cd "$CEDAR_DETECT_DIR"
 
 echo "Working directory: $(pwd)"
 echo "Contents:"
 ls -la
 
 # Build in release mode for production performance
-cargo build --release
+cargo build --release --bin cedar-detect-server
 
 # Verify binary was built
-BINARY="$CEDAR_DETECT_DIR/cedar-detect-server/target/release/cedar-detect-server"
+BINARY="$CEDAR_DETECT_DIR/target/release/cedar-detect-server"
 if [ ! -f "$BINARY" ]; then
     echo "ERROR: cedar-detect-server binary not found after build"
     echo "Expected: $BINARY"
@@ -80,6 +80,7 @@ fi
 
 # Install to system path
 install -m 755 "$BINARY" /usr/local/bin/cedar-detect-server
+
 echo "  Installed: /usr/local/bin/cedar-detect-server"
 
 # Verify installation
