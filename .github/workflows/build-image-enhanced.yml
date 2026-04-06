@@ -26,19 +26,18 @@ jobs:
       
       - name: Download Pi OS
         run: |
-          #wget https://downloads.raspberrypi.org/raspios_oldstable_lite_arm64/images/raspios_oldstable_lite_arm64-${{ inputs.pi_os_date }}/${{ inputs.pi_os_date }}-raspios-bookworm-arm64-lite.img.xz
           wget https://downloads.raspberrypi.org/raspios_oldstable_lite_arm64/images/raspios_oldstable_lite_arm64-2025-11-24/2025-11-24-raspios-bookworm-arm64-lite.img.xz
-          unxz ${{ inputs.pi_os_date }}-raspios-bookworm-arm64-lite.img.xz
+          unxz 2025-11-24-raspios-bookworm-arm64-lite.img.xz
       
       - name: Run installation in ARM environment
         uses: pguyot/arm-runner-action@v2
         with:
-          base_image: ${{ inputs.pi_os_date }}-raspios-bookworm-arm64-lite.img
+          base_image: 2025-11-24-raspios-bookworm-arm64-lite.img
           cpu: cortex-a53
           commands: |
             # Set environment variables
             export USER_PASSWORD=12345678
-            export WIFI_PASSWORD=${{ inputs.wifi_password }}
+            export WIFI_PASSWORD=12345678
             export SAMBA_PASSWORD=12345678
             export NON_INTERACTIVE=1
             
@@ -47,13 +46,13 @@ jobs:
       
       - name: Compress image
         run: |
-          xz -6 -T0 ${{ inputs.pi_os_date }}-raspios-bookworm-arm64-lite.img
+          xz -6 -T0 2025-11-24-raspios-bookworm-arm64-lite.img
       
       - name: Upload image artifact
         uses: actions/upload-artifact@v4
         with:
-          name: efinder-enhanced-${{ inputs.pi_os_date }}
-          path: ${{ inputs.pi_os_date }}-raspios-bookworm-arm64-lite.img.xz
+          name: efinder-enhanced-2025-11-24
+          path: 2025-11-24-raspios-bookworm-arm64-lite.img.xz
           retention-days: 30
       
       - name: Create installation instructions
@@ -69,7 +68,7 @@ jobs:
           
           3. Insert SD card in Pi Zero 2W and power on
           4. Wait 60 seconds for boot
-          5. Connect to WiFi: efinderXXXX (password: ${{ inputs.wifi_password }})
+          5. Connect to WiFi: efinderXXXX (password: 12345678)
           6. Browse to: http://192.168.50.1/
           
           Default credentials:
