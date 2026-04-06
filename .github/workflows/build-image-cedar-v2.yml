@@ -32,7 +32,7 @@ jobs:
       # python3-pip: grpcio-tools for Python stub generation on the host
       - name: Install host tools
         run: |
-          sudo apt-get update -q
+          # sudo apt-get update -q
           sudo apt-get install -y \
             parted e2fsprogs \
             qemu-user-static binfmt-support \
@@ -92,7 +92,7 @@ jobs:
       # -----------------------------------------------------------------------
       - name: Generate Python gRPC stubs (host)
         run: |
-          python3 -m pip install --upgrade pip
+          # python3 -m pip install --upgrade pip
           python3 -m pip install grpcio grpcio-tools
           python3 -m grpc_tools.protoc \
             -I cedar-detect/src/proto \
@@ -119,8 +119,8 @@ jobs:
           db_path = os.path.join(home, 'Solver', 'cedar_database')
           t3 = tetra3.Tetra3(load_database=None)
           t3.generate_database(
-              max_fov=15,
-              min_fov=12,
+              max_fov=11,
+              min_fov=10,
               save_as=db_path,
               star_catalog='hip_main',
               star_max_magnitude=8.0,
@@ -143,6 +143,9 @@ jobs:
             https://cdsarc.cds.unistra.fr/ftp/cats/I/239/hip_main.dat \
             -o hip_main.dat
           ls -lh hip_main.dat
+          echo "folder list"
+          ls ..
+          ls -la
 
       # -----------------------------------------------------------------------
       # Download and unpack the base Raspberry Pi OS image.
@@ -270,10 +273,10 @@ jobs:
           # ------------------------------------------------------------------
           # Package installation.
           # ------------------------------------------------------------------
-          $CHROOT apt-get update -q
-          $CHROOT apt-get upgrade -y \
-            -o Dpkg::Options::="--force-confdef" \
-            -o Dpkg::Options::="--force-confold"
+          # $CHROOT apt-get update -q
+          # $CHROOT apt-get upgrade -y \
+          #   -o Dpkg::Options::="--force-confdef" \
+          #   -o Dpkg::Options::="--force-confold"
           $CHROOT apt-get install -y \
             -o Dpkg::Options::="--force-confdef" \
             -o Dpkg::Options::="--force-confold" \
@@ -310,7 +313,7 @@ jobs:
           printf '[global]\nindex-url = https://pypi.org/simple\nno-extra-index = true\n' | \
             sudo tee /mnt/pi/home/efinder/venv-efinder/pip.conf > /dev/null
 
-          $CHROOT /home/efinder/venv-efinder/bin/pip install --upgrade pip
+          # $CHROOT /home/efinder/venv-efinder/bin/pip install --upgrade pip
 
           # Install Pillow explicitly before cedar-solve so pip's resolver
           # sees it already satisfied and does not attempt a source build.
@@ -338,8 +341,8 @@ jobs:
           # the script sets the working directory to /home/efinder/.
           # Runs under QEMU aarch64 — expect 10-20 minutes on the runner.
           # ------------------------------------------------------------------
-          $CHROOT ls -la /mnt/pi/home/efinder
-          $CHROOT sudo cp /mnt/pi/home/efinder/hip_main.dat \
+          $CHROOT ls -la /home/efinder
+          $CHROOT sudo cp /home/efinder/hip_main.dat \
             /home/efinder/venv-efinder/lib/python3.11/site-packages/tetra3/hip_main.dat
           $CHROOT su -s /bin/bash efinder -c \
             "cd /home/efinder && \
