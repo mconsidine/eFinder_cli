@@ -50,6 +50,10 @@ jobs:
           sudo mkdir -p /mnt/rpi
           sudo mount ${LOOP}p2 /mnt/rpi
 
+      - name: Copy install script into image
+        run: |
+          sudo cp install-complete.sh /mnt/rpi/root/
+
       - name: Prepare chroot
         run: |
           sudo cp /usr/bin/qemu-aarch64-static /mnt/rpi/usr/bin/
@@ -57,10 +61,6 @@ jobs:
           sudo mount --bind /dev /mnt/rpi/dev
           sudo mount --bind /proc /mnt/rpi/proc
           sudo mount --bind /sys /mnt/rpi/sys
-
-      - name: Copy install script into image
-        run: |
-          sudo cp install-complete.sh /mnt/rpi/root/
 
       - name: Run installation inside image
         run: |
