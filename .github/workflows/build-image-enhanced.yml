@@ -71,7 +71,7 @@ jobs:
             export NON_INTERACTIVE=1
 
             cd /root || cd /
-            bash /root/install-complete.sh
+            bash /root/install-complete.sh --non-interactive
           "
 
       - name: Cleanup mounts
