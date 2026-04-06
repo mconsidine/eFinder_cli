@@ -39,7 +39,7 @@ apt-get install -y --no-install-recommends\
     build-essential cmake pkg-config \
     libcfitsio-dev libssl-dev
 
-echo "Installing rust/cargo
+echo "Installing rust/cargo"
 set -e
 
 curl https://sh.rustup.rs -sSf | sh -s -- -y
@@ -51,7 +51,6 @@ if [ -n "$GITHUB_PATH" ]; then
 fi
 
 cargo --version
-
 
 # Optional: full system upgrade (commented out for speed in automated builds)
 # apt-get upgrade -y
