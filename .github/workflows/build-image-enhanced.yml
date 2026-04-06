@@ -54,7 +54,8 @@ jobs:
         run: |
           #sudo cp install-complete.sh /mnt/rpi/root/
           ls ..
-          sudo cp -r . /mnt/rpi/root/
+          ls -la
+          sudo cp -r *.sh /mnt/rpi/root/
           ls -la
 
       - name: Prepare chroot
