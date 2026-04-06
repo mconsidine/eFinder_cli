@@ -273,7 +273,7 @@ jobs:
           # ------------------------------------------------------------------
           # Package installation.
           # ------------------------------------------------------------------
-          # $CHROOT apt-get update -q
+          $CHROOT apt-get update -q
           # $CHROOT apt-get upgrade -y \
           #   -o Dpkg::Options::="--force-confdef" \
           #   -o Dpkg::Options::="--force-confold"
