@@ -1,28 +1,18 @@
 name: v4 Build eFinder Enhanced OS Image
 
 on:
-  inputs:
-    pi_os_date:
-      description: 'Pi OS release date (YYYY-MM-DD)'
-      required: true
-      default: '2025-11-24'
-    wifi_password:
-      description: 'WiFi AP password'
-      required: true
-      default: '12345678'
   push:
-    branches:
-      enhanced
+    branches: [ enhanced ]
   workflow_dispatch:
-  #  inputs:
-  #    pi_os_date:
-  #      description: 'Pi OS release date (YYYY-MM-DD)'
-  #      required: true
-  #      default: '2025-11-24'
-  #    wifi_password:
-  #      description: 'WiFi AP password'
-  #      required: true
-  #      default: '12345678'
+    inputs:
+      pi_os_date:
+        description: 'Pi OS release date (YYYY-MM-DD)'
+        required: true
+        default: '2025-11-24'
+      wifi_password:
+        description: 'WiFi AP password'
+        required: true
+        default: '12345678'
 
 jobs:
   build:
@@ -36,8 +26,8 @@ jobs:
       
       - name: Download Pi OS
         run: |
-          wget https://downloads.raspberrypi.org/raspios_oldstable_lite_arm64/images/raspios_oldstable_lite_arm64-${{ inputs.pi_os_date }}/${{ inputs.pi_os_date }}-raspios-bookworm-arm64-lite.img.xz
-          #wget https://downloads.raspberrypi.org/raspios_oldstable_lite_arm64/images/raspios_oldstable_lite_arm64-2025-11-24/2025-11-24-raspios-bookworm-arm64-lite.img.xz
+          #wget https://downloads.raspberrypi.org/raspios_oldstable_lite_arm64/images/raspios_oldstable_lite_arm64-${{ inputs.pi_os_date }}/${{ inputs.pi_os_date }}-raspios-bookworm-arm64-lite.img.xz
+          wget https://downloads.raspberrypi.org/raspios_oldstable_lite_arm64/images/raspios_oldstable_lite_arm64-2025-11-24/2025-11-24-raspios-bookworm-arm64-lite.img.xz
           unxz ${{ inputs.pi_os_date }}-raspios-bookworm-arm64-lite.img.xz
       
       - name: Run installation in ARM environment
