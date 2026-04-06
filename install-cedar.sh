@@ -40,7 +40,7 @@ fi
 . "$HOME/.cargo/env"
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$HOME/.cargo/bin"
 
-echo "Build environment:"
+echo "Build environment: "
 echo "  PATH : $PATH"
 echo "  cargo: $(cargo --version)"
 echo "  protoc: $(protoc --version)"
