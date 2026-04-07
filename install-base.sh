@@ -52,6 +52,22 @@ apt-get install -y --no-install-recommends \
     libprotobuf-dev
 
 echo ""
+echo "  Disabling piwheels extra index..."
+# Raspberry Pi OS bakes piwheels.org into /etc/pip.conf as an extra-index-url.
+# Inside a chroot build environment the SSL cert store is incomplete and TLS
+# to piwheels consistently fails with SSLZeroReturnError, causing every pip
+# call to retry 5 times before falling back to PyPI.  We override pip.conf
+# to use PyPI only.  On a real Pi this is harmless — PyPI carries aarch64
+# wheels for all packages we need.
+mkdir -p /etc
+cat > /etc/pip.conf << 'PIPCFG'
+[global]
+index-url = https://pypi.org/simple
+extra-index-url =
+PIPCFG
+echo "  pip.conf written — piwheels disabled."
+
+echo ""
 echo "  Installing Pillow via pip (avoids apt dist-info/RECORD conflict)..."
 # --only-binary=:all: uses a pre-built wheel so libjpeg/zlib are not needed
 # at install time (they are still present above in case a source build is ever
