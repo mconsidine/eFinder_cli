@@ -189,6 +189,13 @@ echo "  FOV    : 15 degrees"
 echo "  Output : $TETRA3_PKG/cedar_database.npz"
 echo "  This may take 5-15 minutes..."
 
+# Change to a neutral directory so Python does not find tetra3.py in cwd
+# and import it as a flat module instead of the installed tetra3 package.
+# If cwd is inside the tetra3 source tree, 'import tetra3' resolves to
+# tetra3.py directly, which then fails on 'from tetra3.breadth_first_combinations'
+# because a flat file has no sub-modules.
+cd /tmp
+
 python3 - <<'PYEOF'
 import tetra3
 
