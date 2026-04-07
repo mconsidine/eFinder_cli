@@ -160,14 +160,14 @@ fi
 # ---------------------------------------------------------------------------
 echo ""
 echo "[4/9] Checking eFinder_cli bundle..."
-REPO_URL="https://github.com/mconsidine/eFinder_cli/archive/refs/heads/tinySS.zip"
+REPO_URL="https://github.com/mconsidine/eFinder_cli/archive/refs/heads/enhanced.zip"
 REPO_DIR="$EFINDER_HOME/eFinder_cli"
 if [ ! -d "$REPO_DIR" ]; then
     if [ "$HAVE_INTERNET" = true ]; then
         echo "  Bundle not found — downloading from GitHub..."
         curl -L "$REPO_URL" -o /tmp/efinder.zip
         unzip /tmp/efinder.zip -d /tmp/
-        mv /tmp/eFinder_cli-tinySS "$REPO_DIR"
+        mv /tmp/eFinder_cli-enhanced "$REPO_DIR"
         rm /tmp/efinder.zip
         sudo chown -R "$EFINDER_USER:$EFINDER_USER" "$REPO_DIR"
         echo "  Bundle downloaded and unpacked."
