@@ -189,7 +189,7 @@ fi
 echo ""
 echo "[5/5] Generating cedar star pattern database..."
 echo "  FOV    : 15 degrees"
-echo "  Output : $TETRA3_PKG/data/cedar_database.npz"
+echo "  Output : $TETRA3_PKG/data/t3_fov14_mag8.npz"
 echo "  This may take 5-15 minutes..."
 
 # Change to a neutral directory so Python does not find tetra3.py in cwd
@@ -206,19 +206,20 @@ import tetra3
 t3 = tetra3.Tetra3(load_database=None)
 hip_path = os.path.join(os.path.dirname(tetra3.__file__), 'hip_main.dat')
 t3.generate_database(
-    max_fov=15,
-    save_as='cedar_database',
+    max_fov=14,
+    save_as='t3_fov14_mag8',
     star_catalog=hip_path,
+    star_max_magnitude=8,
 )
 print("  Database generation complete.")
 PYEOF
 
-DB_PATH="$TETRA3_PKG/data/cedar_database.npz"
+DB_PATH="$TETRA3_PKG/data/t3_fov14_mag8.npz"
 if [ -f "$DB_PATH" ]; then
     echo "  ✓ Database created: $DB_PATH"
     ls -lh "$DB_PATH"
 else
-    echo "ERROR: cedar_database.npz not found at $DB_PATH"
+    echo "ERROR: t3_fov14_mag8.npz not found at $DB_PATH"
     exit 1
 fi
 
