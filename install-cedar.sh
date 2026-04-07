@@ -168,9 +168,8 @@ echo "  tetra3 source directory: $TETRA3_PKG"
 cd "$TETRA3_PKG"
 
 if [ ! -f hip_main.dat ]; then
-    wget -q --show-progress \
-        https://cdsarc.cds.unistra.fr/ftp/cats/I/239/hip_main.dat.gz
-    gunzip hip_main.dat.gz
+    wget -q --show-progress --no-check-certificate \
+        https://cdsarc.cds.unistra.fr/ftp/cats/I/239/hip_main.dat
     echo "  ✓ Hipparcos catalogue downloaded ($(du -sh hip_main.dat | cut -f1))"
 else
     echo "  Hipparcos catalogue already present"
