@@ -17,7 +17,7 @@ set -eo pipefail
 EFINDER_HOME=/home/efinder
 EFINDER_USER=efinder
 REPO_URL="https://github.com/mconsidine/eFinder_cli.git"
-REPO_BRANCH="tinySS"
+REPO_BRANCH="enhanced"
 REPO_DIR="$EFINDER_HOME/eFinder_cli"
 
 WIFI_PASSWORD="${WIFI_PASSWORD:-12345678}"
