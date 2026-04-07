@@ -185,7 +185,7 @@ fi
 # ---------------------------------------------------------------------------
 echo ""
 echo "[5/5] Generating cedar star pattern database..."
-echo "  FOV    : 15 degrees"
+echo "  FOV    : 12 degrees"
 echo "  Output : $TETRA3_PKG/cedar_database.npz"
 echo "  This may take 5-15 minutes..."
 
@@ -201,7 +201,7 @@ import tetra3
 
 t3 = tetra3.Tetra3(load_database=None)
 t3.generate_database(
-    max_fov=15,
+    max_fov=12,
     save_as='cedar_database',
     star_catalog='hip_main',
 )
