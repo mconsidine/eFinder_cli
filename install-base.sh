@@ -38,7 +38,8 @@ apt-get install -y --no-install-recommends \
     apache2 php8.2 libapache2-mod-php8.2 \
     build-essential cmake pkg-config \
     libcfitsio-dev libssl-dev \
-    protobuf-compiler
+    protobuf-compiler \
+    libprotobuf-dev
 
 echo "Installing rust/cargo"
 set -e
