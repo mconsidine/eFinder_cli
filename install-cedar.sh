@@ -165,7 +165,8 @@ echo "[4/5] Downloading Hipparcos star catalogue..."
 TETRA3_PKG=$(python3 -c "import tetra3, os; print(os.path.dirname(tetra3.__file__))")
 echo "  tetra3 source directory: $TETRA3_PKG"
 
-cd "$TETRA3_PKG"
+mkdir -p "$TETRA3_PKG/data"
+cd "$TETRA3_PKG/data"
 
 if [ ! -f hip_main.dat ]; then
     wget -q --show-progress --no-check-certificate \
@@ -178,15 +179,15 @@ fi
 # ---------------------------------------------------------------------------
 # [5/5] Generate star pattern database via the tetra3 Python API
 #
-# save_as='cedar_database' (str) → written to tetra3 source dir as
+# save_as='cedar_database' (str) → written to tetra3/data/ as
 # cedar_database.npz, which is where tetra3.Tetra3('cedar_database') finds it.
 # This matches line 268 of eFinder_cedar_v2.py:
 #   t3 = tetra3.Tetra3('cedar_database')
 # ---------------------------------------------------------------------------
 echo ""
 echo "[5/5] Generating cedar star pattern database..."
-echo "  FOV    : 12 degrees"
-echo "  Output : $TETRA3_PKG/cedar_database.npz"
+echo "  FOV    : 15 degrees"
+echo "  Output : $TETRA3_PKG/data/cedar_database.npz"
 echo "  This may take 5-15 minutes..."
 
 # Change to a neutral directory so Python does not find tetra3.py in cwd
@@ -201,14 +202,14 @@ import tetra3
 
 t3 = tetra3.Tetra3(load_database=None)
 t3.generate_database(
-    max_fov=12,
+    max_fov=15,
     save_as='cedar_database',
     star_catalog='hip_main',
 )
 print("  Database generation complete.")
 PYEOF
 
-DB_PATH="$TETRA3_PKG/cedar_database.npz"
+DB_PATH="$TETRA3_PKG/data/cedar_database.npz"
 if [ -f "$DB_PATH" ]; then
     echo "  ✓ Database created: $DB_PATH"
     ls -lh "$DB_PATH"
@@ -218,7 +219,7 @@ else
 fi
 
 # Clean up Hipparcos catalogue (51 MB, not needed at runtime)
-rm -f "$TETRA3_PKG/hip_main.dat"
+rm -f "$TETRA3_PKG/data/hip_main.dat"
 
 # Fix ownership of everything in the cedar-solve dir
 chown -R "$EFINDER_USER:$EFINDER_USER" "$CEDAR_SOLVE_DIR"
