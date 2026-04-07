@@ -2,25 +2,40 @@
 # =============================================================================
 # install-cedar.sh — Phase 2: Cedar-solve & Cedar-detect Installation
 #
-# 1. Clones cedar-detect, compiles the Rust gRPC server binary
-# 2. Clones cedar-solve (a tetra3 fork), installs it as the 'tetra3' Python
-#    module via pip
-# 3. Downloads the Hipparcos catalogue and generates the star pattern database
-#    using the tetra3 Python API
+# cedar-solve's setup.sh does:
+#   python -m venv .cedar_venv
+#   source .cedar_venv/bin/activate
+#   pip install -e ".[dev,docs,cedar-detect]"
+#
+# This installs cedar-solve in editable mode inside a venv that lives within
+# the cloned repo.  The 'tetra3' module resolves directly to files inside the
+# clone, so the repo must remain at its permanent location forever.
+#
+# eFinder_cedar_v2.py does 'import tetra3' from system Python, not from the
+# venv.  We therefore also install cedar-solve into system Python in editable
+# mode so both paths work.
+#
+# Steps:
+#   1. Build cedar-detect Rust gRPC server binary
+#   2. Clone cedar-solve to permanent location, run its setup.sh logic
+#   3. Also install tetra3 into system Python (editable, --ignore-installed)
+#   4. Download Hipparcos catalogue into the tetra3 source directory
+#   5. Generate the star pattern database via the tetra3 Python API
 #
 # Usage:
 #   sudo bash install-cedar.sh
 #
 # Prerequisites (supplied by install-base.sh):
 #   - Rust toolchain (cargo, rustc) via rustup at /root/.cargo
-#   - protobuf-compiler + libprotobuf-dev  (required by cedar-detect build.rs)
-#   - python3-pip, build-essential
+#   - protobuf-compiler + libprotobuf-dev (for cedar-detect build.rs)
+#   - python3-pip, python3-venv, build-essential
 # =============================================================================
 set -eo pipefail
 
 EFINDER_HOME=/home/efinder
+EFINDER_USER=efinder
 CEDAR_DETECT_DIR=/tmp/cedar-detect
-CEDAR_SOLVE_DIR=/tmp/cedar-solve
+CEDAR_SOLVE_DIR="$EFINDER_HOME/cedar-solve"   # permanent — tetra3 lives here
 
 echo "============================================================================="
 echo " Cedar-detect & Cedar-solve Build & Installation"
@@ -33,8 +48,6 @@ fi
 
 # ---------------------------------------------------------------------------
 # Ensure cargo and protoc are on PATH.
-# rustup installs to $HOME/.cargo (which is /root/.cargo when run as root).
-# We set PATH explicitly to avoid sudo secure_path stripping /usr/bin (protoc).
 # ---------------------------------------------------------------------------
 . "$HOME/.cargo/env"
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$HOME/.cargo/bin"
@@ -46,94 +59,111 @@ echo "  protoc: $(protoc --version)"
 
 # ---------------------------------------------------------------------------
 # [1/5] cedar-detect — Rust gRPC star-detection server
-#
-# The cedar-detect repo is a Cargo workspace. The binary target is named
-# 'cedar-detect-server' and lives at the workspace root (not in a subdir).
-# The compiled binary lands at target/release/cedar-detect-server.
 # ---------------------------------------------------------------------------
 echo ""
-echo "[1/5] Cloning cedar-detect repository..."
+echo "[1/5] Cloning and building cedar-detect..."
 
 rm -rf "$CEDAR_DETECT_DIR"
 git clone --depth 1 https://github.com/smroid/cedar-detect.git "$CEDAR_DETECT_DIR"
-
-echo ""
-echo "[2/5] Building cedar-detect-server (Rust binary)..."
-echo "  This may take 10-20 minutes on Pi Zero 2W..."
-
 cd "$CEDAR_DETECT_DIR"
-echo "  Working directory : $(pwd)"
-echo "  Workspace contents:"
-ls -la
 
 cargo build --release --bin cedar-detect-server
 
 BINARY="$CEDAR_DETECT_DIR/target/release/cedar-detect-server"
 if [ ! -f "$BINARY" ]; then
-    echo "ERROR: cedar-detect-server binary not found at expected path:"
-    echo "  $BINARY"
-    echo "Contents of target/release/ :"
-    ls "$CEDAR_DETECT_DIR/target/release/" 2>/dev/null || echo "  (directory not found)"
+    echo "ERROR: binary not found at $BINARY"
+    ls "$CEDAR_DETECT_DIR/target/release/" 2>/dev/null || true
     exit 1
 fi
 
 install -m 755 "$BINARY" /usr/local/bin/cedar-detect-server
-echo "  Installed: /usr/local/bin/cedar-detect-server"
+echo "  ✓ cedar-detect-server installed to /usr/local/bin/"
 
-if command -v cedar-detect-server > /dev/null 2>&1; then
-    echo "  ✓ cedar-detect-server available in PATH"
-else
-    echo "ERROR: cedar-detect-server not found in PATH after installation"
-    exit 1
-fi
-
-# Clean up source — binary is now in /usr/local/bin
 cd /
 rm -rf "$CEDAR_DETECT_DIR"
 
 # ---------------------------------------------------------------------------
-# [3/5] cedar-solve — Python plate-solver (tetra3 fork)
+# [2/5] Clone cedar-solve to permanent location
 #
-# cedar-solve installs as the Python module 'tetra3' (not 'cedar_solve').
-# eFinder_cedar_v2.py does:  import tetra3
-# We install system-wide with --break-system-packages so it is visible to
-# both the system python3 and any venv created with --system-site-packages.
+# The repo must never be deleted — editable installs point directly into it.
 # ---------------------------------------------------------------------------
 echo ""
-echo "[3/5] Cloning and installing cedar-solve Python package..."
+echo "[2/5] Cloning cedar-solve..."
 
-rm -rf "$CEDAR_SOLVE_DIR"
-git clone --depth 1 https://github.com/smroid/cedar-solve.git "$CEDAR_SOLVE_DIR"
-cd "$CEDAR_SOLVE_DIR"
-
-pip3 install --break-system-packages .
-
-# Verify: cedar-solve installs as 'tetra3', not 'cedar_solve'
-if python3 -c "import tetra3" 2>/dev/null; then
-    echo "  ✓ tetra3 module (cedar-solve) imported successfully"
+if [ -d "$CEDAR_SOLVE_DIR" ]; then
+    echo "  Existing clone found — pulling latest..."
+    git -C "$CEDAR_SOLVE_DIR" pull
 else
-    echo "ERROR: 'import tetra3' failed after cedar-solve install"
-    echo "  Installed packages containing 'tetra':"
-    pip3 list 2>/dev/null | grep -i tetra || echo "  (none found)"
-    exit 1
+    git clone --depth 1 https://github.com/smroid/cedar-solve.git "$CEDAR_SOLVE_DIR"
 fi
 
-# Clean up source
-cd /
-rm -rf "$CEDAR_SOLVE_DIR"
+chown -R "$EFINDER_USER:$EFINDER_USER" "$CEDAR_SOLVE_DIR"
+
+# ---------------------------------------------------------------------------
+# [3/5] Replicate cedar-solve's setup.sh, then also install into system Python
+#
+# setup.sh does:
+#   python -m venv .cedar_venv
+#   source .cedar_venv/bin/activate
+#   pip install -e ".[dev,docs,cedar-detect]"
+#
+# We run this as the efinder user so the venv is owned correctly.
+# 'python' may not exist on Bookworm; we use python3 explicitly.
+#
+# We then ALSO install cedar-solve into system Python in editable mode so
+# that eFinder_cedar_v2.py can 'import tetra3' without activating the venv.
+# --ignore-installed prevents pip touching apt-managed packages (e.g. Pillow).
+# ---------------------------------------------------------------------------
+echo ""
+echo "[3/5] Setting up cedar-solve venv and installing..."
+
+cd "$CEDAR_SOLVE_DIR"
+
+# Create the .cedar_venv as efinder user (replicates setup.sh step 1)
+sudo -u "$EFINDER_USER" python3 -m venv "$CEDAR_SOLVE_DIR/.cedar_venv"
+
+# Install cedar-solve into the venv in editable mode with all extras
+# (replicates setup.sh steps 2+3, substituting python3 for python)
+echo "  Installing into .cedar_venv (editable, with cedar-detect extras)..."
+sudo -u "$EFINDER_USER" \
+    "$CEDAR_SOLVE_DIR/.cedar_venv/bin/pip" install \
+    --upgrade pip
+
+sudo -u "$EFINDER_USER" \
+    "$CEDAR_SOLVE_DIR/.cedar_venv/bin/pip" install \
+    -e "$CEDAR_SOLVE_DIR[dev,docs,cedar-detect]"
+
+echo "  ✓ cedar-solve installed in .cedar_venv"
+
+# Also install into system Python so eFinder can import tetra3 without
+# activating the venv.  Editable mode means both installs share the same
+# source files in $CEDAR_SOLVE_DIR — no duplication.
+echo ""
+echo "  Installing tetra3 into system Python (editable, for eFinder import)..."
+pip3 install \
+    --break-system-packages \
+    --ignore-installed \
+    -e "$CEDAR_SOLVE_DIR[cedar-detect]"
+
+# Verify
+if python3 -c "import tetra3; print('  tetra3 location:', tetra3.__file__)" 2>/dev/null; then
+    echo "  ✓ tetra3 importable from system Python"
+else
+    echo "ERROR: 'import tetra3' failed"
+    exit 1
+fi
 
 # ---------------------------------------------------------------------------
 # [4/5] Download Hipparcos star catalogue
 #
-# tetra3 expects hip_main.dat in its package data directory when star_catalog
-# is given as a string. We download it there directly.
+# Editable install means tetra3.__file__ points into $CEDAR_SOLVE_DIR/tetra3/
+# Plain string args to generate_database resolve relative to that directory.
 # ---------------------------------------------------------------------------
 echo ""
 echo "[4/5] Downloading Hipparcos star catalogue..."
 
-# Find the installed tetra3 package directory
 TETRA3_PKG=$(python3 -c "import tetra3, os; print(os.path.dirname(tetra3.__file__))")
-echo "  tetra3 package directory: $TETRA3_PKG"
+echo "  tetra3 source directory: $TETRA3_PKG"
 
 cd "$TETRA3_PKG"
 
@@ -149,22 +179,16 @@ fi
 # ---------------------------------------------------------------------------
 # [5/5] Generate star pattern database via the tetra3 Python API
 #
-# tetra3.Tetra3.generate_database() key parameters:
-#   max_fov      — maximum camera FOV the database covers (degrees)
-#   save_as      — str → saves into tetra3 package data dir as <name>.npz
-#                  This matches how tetra3.Tetra3('cedar_database') loads it.
-#   star_catalog — 'hip_main' → reads hip_main.dat from the package dir
-#
-# eFinder_cedar_v2.py line 268:  t3 = tetra3.Tetra3('cedar_database')
-# That str form resolves to <tetra3_package>/cedar_database.npz, so we must
-# generate with save_as='cedar_database' (str, not Path) to land there.
+# save_as='cedar_database' (str) → written to tetra3 source dir as
+# cedar_database.npz, which is where tetra3.Tetra3('cedar_database') finds it.
+# This matches line 268 of eFinder_cedar_v2.py:
+#   t3 = tetra3.Tetra3('cedar_database')
 # ---------------------------------------------------------------------------
 echo ""
 echo "[5/5] Generating cedar star pattern database..."
 echo "  FOV    : 15 degrees"
 echo "  Output : $TETRA3_PKG/cedar_database.npz"
 echo "  This may take 5-15 minutes..."
-echo ""
 
 python3 - <<'PYEOF'
 import tetra3
@@ -187,16 +211,21 @@ else
     exit 1
 fi
 
-# Clean up Hipparcos catalogue from the package dir (51 MB, no longer needed)
+# Clean up Hipparcos catalogue (51 MB, not needed at runtime)
 rm -f "$TETRA3_PKG/hip_main.dat"
 
-# NOTE: purge of build tools (rustc, cargo, build-essential…) is intentionally
-# left to install-complete.sh so nothing in Phase 3 is broken by an early purge.
+# Fix ownership of everything in the cedar-solve dir
+chown -R "$EFINDER_USER:$EFINDER_USER" "$CEDAR_SOLVE_DIR"
+
+# NOTE: purge of build tools (rustc, cargo, build-essential…) is left to
+# install-complete.sh so nothing in Phase 3 is broken by an early purge.
 
 echo ""
 echo "============================================================================="
 echo " Cedar installation complete"
 echo "  cedar-detect-server : $(which cedar-detect-server)"
-echo "  tetra3 package      : $TETRA3_PKG"
-echo "  Database            : $TETRA3_PKG/cedar_database.npz"
+echo "  cedar-solve clone   : $CEDAR_SOLVE_DIR"
+echo "  cedar-solve venv    : $CEDAR_SOLVE_DIR/.cedar_venv"
+echo "  tetra3 source       : $TETRA3_PKG"
+echo "  Database            : $DB_PATH"
 echo "============================================================================="
