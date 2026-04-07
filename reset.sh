@@ -100,5 +100,5 @@ echo "==========================================================================
 echo ""
 
 curl -sSL \
-    https://raw.githubusercontent.com/mconsidine/eFinder_cli/tinySS/install.sh \
+    https://raw.githubusercontent.com/mconsidine/eFinder_cli/enhanced/install.sh \
     | sudo bash
