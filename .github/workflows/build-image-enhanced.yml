@@ -32,7 +32,8 @@ jobs:
             binfmt-support \
             parted \
             util-linux \
-            kpartx
+            kpartx \
+            dosfstools
 
       - name: Download Pi OS
         run: |
@@ -70,6 +71,11 @@ jobs:
         run: |
           sudo cp /usr/bin/qemu-aarch64-static /mnt/rpi/usr/bin/
 
+          # Mount the FAT boot partition so /boot/firmware/config.txt
+          # and cmdline.txt are accessible inside the chroot
+          sudo mkdir -p /mnt/rpi/boot/firmware
+          sudo mount ${LOOP}p1 /mnt/rpi/boot/firmware
+
           sudo mount --bind /dev /mnt/rpi/dev
           sudo mount --bind /proc /mnt/rpi/proc
           sudo mount --bind /sys /mnt/rpi/sys
@@ -94,6 +100,7 @@ jobs:
           sudo umount /mnt/rpi/dev || true
           sudo umount /mnt/rpi/proc || true
           sudo umount /mnt/rpi/sys || true
+          sudo umount /mnt/rpi/boot/firmware || true
           sudo umount /mnt/rpi || true
           sudo losetup -D
 
