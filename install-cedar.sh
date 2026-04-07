@@ -165,8 +165,10 @@ echo "[4/5] Downloading Hipparcos star catalogue..."
 TETRA3_PKG=$(python3 -c "import tetra3, os; print(os.path.dirname(tetra3.__file__))")
 echo "  tetra3 source directory: $TETRA3_PKG"
 
+# hip_main.dat goes in the tetra3 package root (not data/)
+# tetra3._build_catalog_path resolves plain string to <package_root>/hip_main.dat
 mkdir -p "$TETRA3_PKG/data"
-cd "$TETRA3_PKG/data"
+cd "$TETRA3_PKG"
 
 if [ ! -f hip_main.dat ]; then
     wget -q --show-progress --no-check-certificate \
@@ -198,13 +200,15 @@ echo "  This may take 5-15 minutes..."
 cd /tmp
 
 python3 - <<'PYEOF'
+import os
 import tetra3
 
 t3 = tetra3.Tetra3(load_database=None)
+hip_path = os.path.join(os.path.dirname(tetra3.__file__), 'hip_main.dat')
 t3.generate_database(
     max_fov=15,
     save_as='cedar_database',
-    star_catalog='hip_main',
+    star_catalog=hip_path,
 )
 print("  Database generation complete.")
 PYEOF
@@ -219,7 +223,7 @@ else
 fi
 
 # Clean up Hipparcos catalogue (51 MB, not needed at runtime)
-rm -f "$TETRA3_PKG/data/hip_main.dat"
+rm -f "$TETRA3_PKG/hip_main.dat"
 
 # Fix ownership of everything in the cedar-solve dir
 chown -R "$EFINDER_USER:$EFINDER_USER" "$CEDAR_SOLVE_DIR"
