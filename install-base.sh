@@ -141,8 +141,7 @@ ExecStart=/bin/sh -c 'echo performance | tee /sys/devices/system/cpu/cpu*/cpufre
 WantedBy=multi-user.target
 EOF
 
-systemctl daemon-reload
-systemctl enable cpu-performance.service
+systemctl enable --root=/ cpu-performance.service
 
 echo ""
 echo "============================================================================="
