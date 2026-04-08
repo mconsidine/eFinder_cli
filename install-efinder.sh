@@ -348,6 +348,22 @@ fi
 echo ""
 echo "[9/10] Configuring NetworkManager WiFi AP..."
 
+# Unblock WiFi radio via rfkill.
+# On a freshly-flashed Bookworm image with no WiFi configured in the
+# Imager, the radio is blocked by default as a safety measure.
+# NetworkManager will not bring up any WiFi interface — including the AP —
+# until rfkill is unblocked.  We unblock it here and persist the state.
+rfkill unblock wifi
+for filename in /var/lib/systemd/rfkill/*:wlan; do
+    [ -f "$filename" ] && echo 0 > "$filename"
+done
+# Set WiFi country code — required for the radio to operate outside
+# of regulatory test mode.  US is the default; override by setting
+# WIFI_COUNTRY in the environment before calling this script.
+WIFI_COUNTRY="${WIFI_COUNTRY:-US}"
+raspi-config nonint do_wifi_country "$WIFI_COUNTRY" 2>/dev/null || true
+echo "  WiFi radio unblocked, country: $WIFI_COUNTRY"
+
 # Get MAC address for SSID suffix
 MAC=$(cat /sys/class/net/wlan0/address 2>/dev/null || echo "00:00:00:00:00:00")
 LAST4=$(echo "$MAC" | tr -d ':' | tail -c 5)
@@ -377,6 +393,7 @@ type=wifi
 interface-name=wlan0
 autoconnect=true
 autoconnect-priority=100
+autoconnect-retries=-1
 
 [wifi]
 mode=ap
@@ -402,16 +419,15 @@ chmod 600 "$NM_CONN_DIR/efinder-ap.nmconnection"
 echo "  AP profile written to $NM_CONN_DIR/efinder-ap.nmconnection"
 echo "  AP IP: 192.168.50.1"
 
-# Disable autoconnect on the Pi OS default "preconfigured" client profile
-# so it does not take priority over the AP profile on first boot.
-# We patch the file directly since nmcli requires a running daemon.
+# Remove the Pi OS default "preconfigured" client WiFi profile entirely.
+# If it exists and has autoconnect=true, NM will prefer it over the AP
+# profile and the hotspot will never come up.  On a freshly-flashed image
+# this file may not exist yet — that is fine, no client profile means NM
+# will activate the AP profile automatically.
 PRECONFIGURED="$NM_CONN_DIR/preconfigured.nmconnection"
 if [ -f "$PRECONFIGURED" ]; then
-    sed -i 's/^autoconnect=.*/autoconnect=false/' "$PRECONFIGURED"
-    # Add autoconnect=false if the key is absent
-    grep -q "^autoconnect=" "$PRECONFIGURED" || \
-        sed -i '/^\[connection\]/a autoconnect=false' "$PRECONFIGURED"
-    echo "  Disabled autoconnect on preconfigured client profile"
+    rm -f "$PRECONFIGURED"
+    echo "  Removed preconfigured client profile"
 else
     echo "  No preconfigured client profile found (normal for fresh image)"
 fi
@@ -495,12 +511,36 @@ EOF
     echo "  tmpfs mounts added to /etc/fstab"
 fi
 
+# Create cedar-detect gRPC server service
+# Must start before efinder.service since eFinder connects to it on startup.
+cat > /etc/systemd/system/cedar-detect.service << 'EOF'
+[Unit]
+Description=Cedar-detect star detection gRPC server
+After=local-fs.target
+Before=efinder.service
+
+[Service]
+Type=simple
+User=efinder
+ExecStart=/usr/local/bin/cedar-detect-server --port 50051
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl enable --root=/ cedar-detect.service
+echo "  cedar-detect service installed and enabled"
+
 # Create eFinder systemd service
 cat > /etc/systemd/system/efinder.service << 'EOF'
 [Unit]
 Description=eFinder telescope plate solver
-After=network-online.target
-Wants=network-online.target
+After=network-online.target cedar-detect.service
+Wants=network-online.target cedar-detect.service
 
 [Service]
 Type=simple
@@ -532,8 +572,13 @@ systemctl enable --root=/ ssh
 # Enable I2C (for optional accelerometer)
 raspi-config nonint do_i2c 0 2>/dev/null || true
 
-# Disable serial console (keep UART enabled for USB serial)
+# Disable serial console on hardware UART (keep UART enabled for USB gadget)
 raspi-config nonint do_serial_cons 1 2>/dev/null || true
+
+# Enable getty on the USB CDC gadget serial port so tethered login works.
+# ttyGS0 is the Pi-side device created by g_cdc; the host sees /dev/ttyACM0.
+# serial-getty@.service is the correct template on Bookworm (not getty@).
+systemctl enable --root=/ serial-getty@ttyGS0.service
 
 # Set hostname
 if [ "$(hostname)" != "efinder" ]; then
