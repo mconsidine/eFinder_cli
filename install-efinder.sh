@@ -109,7 +109,7 @@ Timeout 3600
 EOF
 
 a2enconf efinder
-systemctl enable apache2
+systemctl enable --root=/ apache2
 
 echo "  Apache configured with 3600s timeout"
 
@@ -147,7 +147,7 @@ fi
 # Set Samba password for efinder user
 (echo "$SAMBA_PASSWORD"; echo "$SAMBA_PASSWORD") | smbpasswd -s -a "$EFINDER_USER"
 
-systemctl enable smbd
+systemctl enable --root=/ smbd
 echo "  Samba share configured: \\\\<hostname>\\efindershare"
 
 echo ""
@@ -359,28 +359,111 @@ password:${WIFI_PASSWORD}
 EOF
 chown "$EFINDER_USER:$EFINDER_USER" "$EFINDER_HOME/Solver/default_hotspot.txt"
 
-# Delete existing AP profile
-nmcli connection delete "efinder-ap" 2>/dev/null || true
+# Write the NetworkManager connection file directly — nmcli requires a
+# running D-Bus/NetworkManager daemon which is not present in a chroot.
+# NM reads these keyfile connections on first boot automatically.
+NM_CONN_DIR=/etc/NetworkManager/system-connections
+mkdir -p "$NM_CONN_DIR"
 
-# Create AP profile
-nmcli connection add \
-    type wifi \
-    ifname wlan0 \
-    con-name "efinder-ap" \
-    autoconnect yes \
-    ssid "$SSID" \
-    wifi-sec.key-mgmt wpa-psk \
-    wifi-sec.psk "$WIFI_PASSWORD" \
-    wifi.mode ap \
-    wifi.band bg \
-    wifi.channel 6 \
-    ipv4.method shared \
-    ipv4.addresses "192.168.50.1/24" \
-    ipv6.method disabled \
-    connection.autoconnect-priority 100
+cat > "$NM_CONN_DIR/efinder-ap.nmconnection" << NMEOF
+[connection]
+id=efinder-ap
+uuid=$(cat /proc/sys/kernel/random/uuid)
+type=wifi
+interface-name=wlan0
+autoconnect=true
+autoconnect-priority=100
 
-echo "  AP profile 'efinder-ap' created"
+[wifi]
+mode=ap
+ssid=${SSID}
+band=bg
+channel=6
+
+[wifi-security]
+key-mgmt=wpa-psk
+psk=${WIFI_PASSWORD}
+
+[ipv4]
+method=shared
+address1=192.168.50.1/24
+
+[ipv6]
+method=disabled
+NMEOF
+
+# NM keyfile connections must be owned by root and not world-readable
+chmod 600 "$NM_CONN_DIR/efinder-ap.nmconnection"
+
+echo "  AP profile written to $NM_CONN_DIR/efinder-ap.nmconnection"
 echo "  AP IP: 192.168.50.1"
+
+# ---------------------------------------------------------------------------
+# First-boot MAC fixup service
+#
+# At image-build time the real wlan0 MAC is unknown, so the SSID in the NM
+# connection file is set to "efinder0000".  This oneshot service runs once
+# on first boot, reads the real MAC, rewrites the SSID in the connection
+# file and default_hotspot.txt, reloads NetworkManager, then disables and
+# deletes itself so it never runs again.
+# ---------------------------------------------------------------------------
+cat > /usr/local/bin/efinder-firstboot.sh << 'FIRSTBOOT'
+#!/bin/bash
+set -e
+
+NM_CONN=/etc/NetworkManager/system-connections/efinder-ap.nmconnection
+HOTSPOT=/home/efinder/Solver/default_hotspot.txt
+
+# Read real MAC and derive last-4 hex digits for SSID
+MAC=$(cat /sys/class/net/wlan0/address 2>/dev/null || echo "")
+if [ -z "$MAC" ]; then
+    echo "efinder-firstboot: wlan0 MAC not readable, skipping SSID update"
+else
+    LAST4=$(echo "$MAC" | tr -d ':' | tail -c 5)
+    NEW_SSID="efinder${LAST4}"
+
+    # Update NM connection file
+    sed -i "s/^ssid=.*/ssid=${NEW_SSID}/" "$NM_CONN"
+
+    # Update default_hotspot.txt
+    sed -i "s/^ssid:.*/ssid:${NEW_SSID}/" "$HOTSPOT"
+
+    # Reload NetworkManager so it picks up the changed connection
+    nmcli connection reload 2>/dev/null || true
+    nmcli connection up efinder-ap 2>/dev/null || true
+
+    echo "efinder-firstboot: SSID set to ${NEW_SSID}"
+fi
+
+# Disable and remove this service so it never runs again
+systemctl disable efinder-firstboot.service
+rm -f /etc/systemd/system/efinder-firstboot.service
+rm -f /usr/local/bin/efinder-firstboot.sh
+systemctl daemon-reload
+FIRSTBOOT
+
+chmod 755 /usr/local/bin/efinder-firstboot.sh
+
+cat > /etc/systemd/system/efinder-firstboot.service << 'EOF'
+[Unit]
+Description=eFinder first-boot SSID configuration
+After=network.target NetworkManager.service
+Wants=NetworkManager.service
+ConditionPathExists=/usr/local/bin/efinder-firstboot.sh
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/efinder-firstboot.sh
+RemainAfterExit=yes
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl enable --root=/ efinder-firstboot.service
+echo "  First-boot SSID fixup service installed"
 
 echo ""
 echo "[10/10] Configuring system services..."
@@ -417,16 +500,16 @@ StandardError=journal
 WantedBy=multi-user.target
 EOF
 
-# Reload systemd and enable services
-systemctl daemon-reload
-systemctl enable efinder.service
+# Enable service using --root=/ so it works without a running systemd
+# (daemon-reload is not needed when using --root=/)
+systemctl enable --root=/ efinder.service
 
 echo "  eFinder service installed and enabled"
 
 # Configure SSH
 sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
 sed -i 's/^#*PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
-systemctl enable ssh
+systemctl enable --root=/ ssh
 
 # Enable I2C (for optional accelerometer)
 raspi-config nonint do_i2c 0 2>/dev/null || true
