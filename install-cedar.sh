@@ -117,6 +117,40 @@ chown -R "$EFINDER_USER:$EFINDER_USER" "$CEDAR_SOLVE_DIR"
 echo ""
 echo "[3/5] Setting up cedar-solve venv and installing..."
 
+# -----------------------------------------------------------------------
+# Patch pyproject.toml to remove upper version bounds on dependencies.
+# cedar-solve pins hard maximums (e.g. Pillow<10, numpy<2) that conflict
+# with newer versions already installed in our image.  There is no known
+# functional reason for these upper bounds.  We strip any ",<version"
+# or standalone "<version" constraint so pip resolves against whatever
+# is actually present.
+#   "Pillow>=8.0,<10"  ->  "Pillow>=8.0"
+#   "numpy<2"          ->  "numpy"
+# -----------------------------------------------------------------------
+if [ -f "$CEDAR_SOLVE_DIR/pyproject.toml" ]; then
+    echo "  Patching pyproject.toml — removing upper version bounds..."
+    # Remove ,<N.N style upper bounds (with optional whitespace after comma)
+    sed -i 's/,[[:space:]]*<[0-9][0-9.]*//g' "$CEDAR_SOLVE_DIR/pyproject.toml"
+    # Remove standalone <N.N upper bounds (package listed with only an upper bound)
+    sed -i 's/[[:space:]]*<[0-9][0-9.]*//g' "$CEDAR_SOLVE_DIR/pyproject.toml"
+    echo "  Done. Effective dependencies:"
+    python3 -c "
+import re, sys
+with open('$CEDAR_SOLVE_DIR/pyproject.toml') as f:
+    content = f.read()
+in_deps = False
+for line in content.splitlines():
+    if 'dependencies' in line and '=' in line:
+        in_deps = True
+    if in_deps:
+        print(' ', line)
+    if in_deps and line.strip() == ']':
+        break
+" 2>/dev/null || true
+else
+    echo "  WARNING: pyproject.toml not found — skipping patch"
+fi
+
 cd "$CEDAR_SOLVE_DIR"
 
 # Create the .cedar_venv as efinder user (replicates setup.sh step 1)
