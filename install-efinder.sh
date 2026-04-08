@@ -327,7 +327,7 @@ cat >> "$BOOT_CONFIG" << 'EOF'
 camera_auto_detect=0
 dtoverlay=imx477
 
-# USB gadget serial — enables /dev/ttyGS0 for tethered console
+# USB gadget — enables CDC serial (/dev/ttyACM0 on host, /dev/ttyGS0 on Pi)
 dtoverlay=dwc2,dr_mode=peripheral
 enable_uart=1
 EOF
@@ -336,9 +336,13 @@ echo "  Boot firmware configured for IMX477 camera and USB serial"
 
 # Configure cmdline for USB gadget
 CMDLINE=/boot/firmware/cmdline.txt
-if ! grep -q "modules-load=dwc2,g_serial" "$CMDLINE"; then
-    sed -i 's/rootwait/rootwait modules-load=dwc2,g_serial/' "$CMDLINE"
-    echo "  Kernel command line updated for USB serial"
+# g_cdc (CDC composite) presents as /dev/ttyACM0 on the host, which is
+# the standard ACM serial device. g_serial presents as /dev/ttyUSB0 instead.
+if ! grep -q "modules-load=dwc2,g_cdc" "$CMDLINE"; then
+    # Remove any existing gadget module load
+    sed -i 's/ modules-load=dwc2,g_serial//' "$CMDLINE"
+    sed -i 's/rootwait/rootwait modules-load=dwc2,g_cdc/' "$CMDLINE"
+    echo "  Kernel command line updated for USB CDC serial (ttyACM0)"
 fi
 
 echo ""
@@ -397,6 +401,20 @@ chmod 600 "$NM_CONN_DIR/efinder-ap.nmconnection"
 
 echo "  AP profile written to $NM_CONN_DIR/efinder-ap.nmconnection"
 echo "  AP IP: 192.168.50.1"
+
+# Disable autoconnect on the Pi OS default "preconfigured" client profile
+# so it does not take priority over the AP profile on first boot.
+# We patch the file directly since nmcli requires a running daemon.
+PRECONFIGURED="$NM_CONN_DIR/preconfigured.nmconnection"
+if [ -f "$PRECONFIGURED" ]; then
+    sed -i 's/^autoconnect=.*/autoconnect=false/' "$PRECONFIGURED"
+    # Add autoconnect=false if the key is absent
+    grep -q "^autoconnect=" "$PRECONFIGURED" || \
+        sed -i '/^\[connection\]/a autoconnect=false' "$PRECONFIGURED"
+    echo "  Disabled autoconnect on preconfigured client profile"
+else
+    echo "  No preconfigured client profile found (normal for fresh image)"
+fi
 
 # ---------------------------------------------------------------------------
 # First-boot MAC fixup service
