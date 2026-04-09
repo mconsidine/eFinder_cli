@@ -79,6 +79,26 @@ fi
 install -m 755 "$BINARY" /usr/local/bin/cedar-detect-server
 echo "  ✓ cedar-detect-server installed to /usr/local/bin/"
 
+# Compile gRPC Python stubs from the proto file before deleting the source.
+# eFinder_cedar_v2.py imports cedar_detect_pb2 and cedar_detect_pb2_grpc
+# from ~/Solver/ — these must be pre-compiled into the image.
+PROTO_SRC="$CEDAR_DETECT_DIR/src/proto/cedar_detect.proto"
+STUB_DEST="$EFINDER_HOME/Solver"
+mkdir -p "$STUB_DEST"
+
+if [ -f "$PROTO_SRC" ]; then
+    python3 -m grpc_tools.protoc \
+        -I "$CEDAR_DETECT_DIR/src/proto" \
+        --python_out="$STUB_DEST" \
+        --grpc_python_out="$STUB_DEST" \
+        "$PROTO_SRC"
+    echo "  ✓ gRPC stubs compiled to $STUB_DEST"
+    ls "$STUB_DEST"/cedar_detect_pb2*.py
+else
+    echo "ERROR: proto file not found at $PROTO_SRC"
+    exit 1
+fi
+
 cd /
 rm -rf "$CEDAR_DETECT_DIR"
 
