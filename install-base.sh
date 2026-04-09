@@ -1,7 +1,7 @@
 #!/bin/bash
 # =============================================================================
 # install-base.sh — Phase 1: Base System Setup
-# 
+#
 # Sets up the base system: user account, directories, and core packages.
 # Can be run standalone or as part of automated image build.
 #
@@ -18,7 +18,6 @@ echo "==========================================================================
 echo " eFinder Base System Setup"
 echo "============================================================================="
 
-# Check if running as root
 if [ "$EUID" -ne 0 ]; then
     echo "ERROR: Must run as root (use sudo)"
     exit 1
@@ -37,12 +36,12 @@ echo "[2/4] Installing base packages..."
 # because there is no RECORD to guide the removal.
 # Solution: install Pillow once via pip below, before anything else touches it.
 #
-# libjpeg-dev and zlib1g-dev are the build deps Pillow needs if no binary
-# wheel is available for this platform/Python combination.
+# libjpeg-dev and zlib1g-dev are retained as build-time deps for Pillow in
+# case no binary wheel is available for this platform/Python combination.
 apt-get install -y --no-install-recommends \
     git curl wget unzip \
     python3-pip python3-venv \
-    python3-smbus python3-picamera2 python3-scipy \
+    python3-serial python3-smbus python3-picamera2 python3-scipy \
     libjpeg-dev zlib1g-dev \
     samba samba-common-bin \
     apache2 php8.2 libapache2-mod-php8.2 \
@@ -59,7 +58,6 @@ echo "  Disabling piwheels extra index..."
 # call to retry 5 times before falling back to PyPI.  We override pip.conf
 # to use PyPI only.  On a real Pi this is harmless — PyPI carries aarch64
 # wheels for all packages we need.
-mkdir -p /etc
 cat > /etc/pip.conf << 'PIPCFG'
 [global]
 index-url = https://pypi.org/simple
@@ -69,15 +67,12 @@ echo "  pip.conf written — piwheels disabled."
 
 echo ""
 echo "  Installing Pillow via pip (avoids apt dist-info/RECORD conflict)..."
-# --only-binary=:all: uses a pre-built wheel so libjpeg/zlib are not needed
-# at install time (they are still present above in case a source build is ever
-# required).  Pillow >=9,<11 is compatible with Python 3.11 on Bookworm and
-# with picamera2.
-pip3 install --break-system-packages "Pillow>=9.0,<11.0" --only-binary=:all:
+# --only-binary=:all: uses a pre-built wheel, avoiding any source compile.
+# Pillow >=9 — no upper bound, installs latest compatible wheel.
+pip3 install --break-system-packages "Pillow>=9.0" --only-binary=:all:
 
-echo "Installing rust/cargo"
-set -e
-
+echo ""
+echo "[2b] Installing Rust toolchain..."
 curl https://sh.rustup.rs -sSf | sh -s -- -y
 . "$HOME/.cargo/env"
 
@@ -91,7 +86,6 @@ cargo --version
 echo ""
 echo "[3/4] Creating efinder user and directory structure..."
 
-# Create efinder user if it doesn't exist
 if ! id -u "$EFINDER_USER" > /dev/null 2>&1; then
     useradd -m -s /bin/bash "$EFINDER_USER"
     echo "${EFINDER_USER}:${USER_PASSWORD}" | chpasswd
@@ -101,13 +95,13 @@ else
     echo "  User '$EFINDER_USER' already exists"
 fi
 
-# Create directory structure
+# ~/Solver/images  — tmpfs mount point for captured images (write-heavy)
+# ~/Solver/www     — staging area (web files copied from here to /var/www/html/)
+# ~/uploads        — OTA update zip drop location
 mkdir -p "$EFINDER_HOME/Solver/images"
-mkdir -p "$EFINDER_HOME/Solver/databases"
 mkdir -p "$EFINDER_HOME/Solver/www"
 mkdir -p "$EFINDER_HOME/uploads"
 
-# Set permissions
 chmod a+rwx "$EFINDER_HOME/uploads"
 chmod a+rwx "$EFINDER_HOME/Solver/images"
 chown -R "$EFINDER_USER:$EFINDER_USER" "$EFINDER_HOME"
@@ -122,11 +116,11 @@ if command -v dphys-swapfile > /dev/null 2>&1; then
     systemctl disable dphys-swapfile 2>/dev/null || true
 fi
 
-# Set swappiness to 0
+# Reduce swappiness (further protects SD card)
 grep -q "vm.swappiness" /etc/sysctl.conf || \
     echo 'vm.swappiness = 0' >> /etc/sysctl.conf
 
-# CPU performance mode
+# CPU performance governor — keeps solving latency consistent
 cat > /etc/systemd/system/cpu-performance.service << 'EOF'
 [Unit]
 Description=Set CPU governor to performance mode
