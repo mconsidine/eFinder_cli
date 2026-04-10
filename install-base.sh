@@ -41,7 +41,7 @@ echo "[2/4] Installing base packages..."
 apt-get install -y --no-install-recommends \
     git curl wget unzip \
     python3-pip python3-venv \
-    python3-serial python3-smbus python3-picamera2 python3-scipy \
+    python3-serial python3-smbus python3-picamera2 python3-scipy python3-numpy \
     libjpeg-dev zlib1g-dev \
     samba samba-common-bin \
     apache2 php8.2 libapache2-mod-php8.2 \
@@ -70,6 +70,25 @@ echo "  Installing Pillow via pip (avoids apt dist-info/RECORD conflict)..."
 # --only-binary=:all: uses a pre-built wheel, avoiding any source compile.
 # Pillow >=9 — no upper bound, installs latest compatible wheel.
 pip3 install --break-system-packages "Pillow>=9.0" --only-binary=:all:
+
+echo ""
+echo "  Pinning numpy and scipy to system apt versions..."
+# picamera2 depends on simplejpeg which is a C extension compiled against
+# the apt-installed numpy.  If pip installs a different numpy version,
+# simplejpeg fails at import with "numpy.dtype size changed" binary
+# incompatibility.  We pin numpy and scipy to match the system versions
+# by installing them from apt first, then telling pip they are satisfied.
+# --ignore-installed prevents pip from overwriting the apt versions.
+NUMPY_VER=$(python3 -c "import numpy; print(numpy.__version__)" 2>/dev/null || echo "")
+SCIPY_VER=$(python3 -c "import scipy; print(scipy.__version__)" 2>/dev/null || echo "")
+if [ -n "$NUMPY_VER" ]; then
+    pip3 install --break-system-packages --ignore-installed "numpy==${NUMPY_VER}"
+    echo "  numpy pinned to system version: ${NUMPY_VER}"
+fi
+if [ -n "$SCIPY_VER" ]; then
+    pip3 install --break-system-packages --ignore-installed "scipy==${SCIPY_VER}"
+    echo "  scipy pinned to system version: ${SCIPY_VER}"
+fi
 
 echo ""
 echo "[2b] Installing Rust toolchain..."
