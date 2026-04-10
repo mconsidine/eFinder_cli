@@ -571,6 +571,8 @@ cat > /etc/systemd/system/efinder.service << 'EOF'
 Description=eFinder telescope plate solver
 After=network-online.target cedar-detect.service
 Wants=network-online.target cedar-detect.service
+StartLimitIntervalSec=120
+StartLimitBurst=4
 
 [Service]
 Type=simple
@@ -579,8 +581,6 @@ WorkingDirectory=/home/efinder/Solver
 ExecStart=/usr/bin/python3 /home/efinder/Solver/eFinder_cedar_v2.py
 Restart=on-failure
 RestartSec=15
-StartLimitIntervalSec=120
-StartLimitBurst=4
 StandardOutput=journal
 StandardError=journal
 
@@ -638,18 +638,4 @@ echo "    - README"
 echo ""
 echo "  SkySafari:"
 echo "    Protocol: LX200"
-echo "    Host: 192.168.50.1"
-echo "    Port: 4060"
-echo ""
-echo "  Helper Scripts:"
-echo "    ~/station.sh <ssid> [password]  - Connect to WiFi"
-echo "    ~/ap.sh                         - Return to AP mode"
-echo "    ~/reset.sh                      - Wipe and reinstall"
-echo ""
-echo "  Services:"
-echo "    sudo systemctl status efinder   - Check status"
-echo "    journalctl -u efinder -f        - View logs"
-echo ""
-echo "  Reboot required to activate all changes:"
-echo "    sudo reboot"
-echo "============================================================================="
+echo "    Host: 192.1
