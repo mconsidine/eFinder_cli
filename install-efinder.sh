@@ -74,24 +74,31 @@ cp "$REPO_DIR/Solver/www/stream.php" /var/www/html/
 #cp "$REPO_DIR/Solver/www/upload.php" /var/www/html/
 #cp "$REPO_DIR/Solver/www/updater.html" /var/www/html/
 # Convert README.md to HTML for browser rendering.
-# python3-markdown is available in Bookworm apt.
+# Write the converter as a temp file to avoid shell quoting issues with
+# inline python3 -c strings containing < > and triple-quoted HTML.
 apt-get install -y --no-install-recommends python3-markdown 2>/dev/null || true
-python3 -c "
+cat > /tmp/md2html.py << 'MD2HTML'
 import markdown, sys
-with open(sys.argv[1]) as f: body = f.read()
-html = markdown.markdown(body, extensions=["fenced_code","tables"])
+CSS = (
+    "body{font-family:sans-serif;max-width:900px;margin:2em auto;padding:0 1em;}"
+    "code{background:#f4f4f4;padding:2px 4px;border-radius:3px;}"
+    "pre{background:#f4f4f4;padding:1em;overflow-x:auto;border-radius:4px;}"
+    "table{border-collapse:collapse;width:100%;}"
+    "th,td{border:1px solid #ddd;padding:6px 10px;text-align:left;}"
+    "th{background:#f0f0f0;}"
+)
+with open(sys.argv[1]) as f:
+    body = f.read()
+html = markdown.markdown(body, extensions=["fenced_code", "tables"])
 with open(sys.argv[2], "w") as f:
-    f.write("""<!DOCTYPE html><html><head>
-<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">
-<style>body{font-family:sans-serif;max-width:900px;margin:2em auto;padding:0 1em;}
-code{background:#f4f4f4;padding:2px 4px;border-radius:3px;}
-pre{background:#f4f4f4;padding:1em;overflow-x:auto;border-radius:4px;}
-table{border-collapse:collapse;width:100%;}
-th,td{border:1px solid #ddd;padding:6px 10px;text-align:left;}
-th{background:#f0f0f0;}</style></head><body>""")
+    f.write("<!DOCTYPE html><html><head>")
+    f.write('<meta name="viewport" content="width=device-width,initial-scale=1">')
+    f.write("<style>" + CSS + "</style></head><body>")
     f.write(html)
     f.write("</body></html>")
-" "$REPO_DIR/README.md" /var/www/html/README.html
+MD2HTML
+python3 /tmp/md2html.py "$REPO_DIR/README.md" /var/www/html/README.html
+rm -f /tmp/md2html.py
 
 # Copy API endpoints
 cp "$REPO_DIR/Solver/www/api/state.php" /var/www/html/api/
