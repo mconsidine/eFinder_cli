@@ -101,7 +101,7 @@ $current_page = basename($_SERVER['PHP_SELF']);
             </a>
         </li>
         <li>
-            <a href="README.md" target="_blank">
+            <a href="README.html" target="_blank">
                 Help
             </a>
         </li>
