@@ -41,7 +41,7 @@ echo htmlspecialchars($output ?? 'No log output available.');
 ?></pre>
 <div class="nav">
     <a href="/">Home</a>
-    <a href="/README.md">README</a>
+    <a href="/README.html">README</a>
 </div>
 </body>
 </html>
