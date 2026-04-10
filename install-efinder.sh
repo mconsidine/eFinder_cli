@@ -73,7 +73,7 @@ cp "$REPO_DIR/Solver/www/log.php" /var/www/html/
 cp "$REPO_DIR/Solver/www/stream.php" /var/www/html/
 #cp "$REPO_DIR/Solver/www/upload.php" /var/www/html/
 #cp "$REPO_DIR/Solver/www/updater.html" /var/www/html/
-#cp "$REPO_DIR/README.md" /var/www/html/
+cp "$REPO_DIR/README.md" /var/www/html/
 
 # Copy API endpoints
 cp "$REPO_DIR/Solver/www/api/state.php" /var/www/html/api/
@@ -110,6 +110,11 @@ EOF
 
 a2enconf efinder
 systemctl enable --root=/ apache2
+
+# Add www-data to systemd-journal group so log.php can read the journal.
+# Without this, shell_exec("journalctl ...") returns empty output because
+# Apache runs as www-data which has no journal read permission by default.
+usermod -aG systemd-journal www-data
 
 echo "  Apache configured with 3600s timeout"
 
