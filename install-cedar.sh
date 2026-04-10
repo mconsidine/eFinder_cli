@@ -201,8 +201,11 @@ else
     exit 1
 fi
 
-# Compile gRPC Python stubs now that grpcio-tools is available (installed
-# via cedar-solve [dev] extra above).
+# Install grpcio-tools into system Python explicitly — the [dev] extra
+# above installs it into the venv only, not into /usr/bin/python3.
+pip3 install --break-system-packages --ignore-installed grpcio-tools
+
+# Compile gRPC Python stubs.
 # eFinder_cedar_v2.py imports cedar_detect_pb2 and cedar_detect_pb2_grpc
 # from ~/Solver/ — these must be pre-compiled into the image.
 STUB_DEST="$EFINDER_HOME/Solver"
@@ -250,10 +253,10 @@ fi
 # ---------------------------------------------------------------------------
 # [5/5] Generate star pattern database via the tetra3 Python API
 #
-# save_as='cedar_database' (str) → written to tetra3/data/ as
-# cedar_database.npz, which is where tetra3.Tetra3('cedar_database') finds it.
+# save_as='t3_fov14_mag8' (str) → written to tetra3/data/ as
+# t3_fov14_mag8.npz, which is where tetra3.Tetra3('t3_fov14_mag8') finds it.
 # This matches line 268 of eFinder_cedar_v2.py:
-#   t3 = tetra3.Tetra3('cedar_database')
+#   t3 = tetra3.Tetra3('t3_fov14_mag8')
 # ---------------------------------------------------------------------------
 echo ""
 echo "[5/5] Generating cedar star pattern database..."
