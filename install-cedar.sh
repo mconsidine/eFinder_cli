@@ -183,15 +183,21 @@ sudo -u "$EFINDER_USER" \
 
 echo "  ✓ cedar-solve installed in .cedar_venv"
 
-# Also install into system Python so eFinder can import tetra3 without
-# activating the venv.  Editable mode means both installs share the same
-# source files in $CEDAR_SOLVE_DIR — no duplication.
+# Make tetra3 importable from system Python by adding the cedar-solve
+# source directory to the system Python path via a .pth file.
+# This is more reliable than an editable pip install on Bookworm because
+# --break-system-packages + -e can silently produce a non-editable install
+# whose metadata is not picked up by system Python.
 echo ""
-echo "  Installing tetra3 into system Python (editable, for eFinder import)..."
-pip3 install \
-    --break-system-packages \
-    --ignore-installed \
-    -e "$CEDAR_SOLVE_DIR[cedar-detect]"
+echo "  Adding cedar-solve to system Python path via .pth file..."
+PYTHON_DIST=$(python3 -c "import site; print(site.getsitepackages()[0])")
+echo "$CEDAR_SOLVE_DIR" > "$PYTHON_DIST/cedar-solve.pth"
+echo "  Written: $PYTHON_DIST/cedar-solve.pth -> $CEDAR_SOLVE_DIR"
+
+# Install grpcio and protobuf into system Python (needed by eFinder at
+# runtime for gRPC calls to cedar-detect).  grpcio-tools is added later
+# for stub compilation.  --ignore-installed protects numpy/scipy.
+pip3 install --break-system-packages --ignore-installed grpcio protobuf
 
 # Verify
 if python3 -c "import tetra3; print('  tetra3 location:', tetra3.__file__)" 2>/dev/null; then
