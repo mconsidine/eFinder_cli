@@ -79,21 +79,15 @@ fi
 install -m 755 "$BINARY" /usr/local/bin/cedar-detect-server
 echo "  ✓ cedar-detect-server installed to /usr/local/bin/"
 
-# Compile gRPC Python stubs from the proto file before deleting the source.
-# eFinder_cedar_v2.py imports cedar_detect_pb2 and cedar_detect_pb2_grpc
-# from ~/Solver/ — these must be pre-compiled into the image.
+# Save the proto file to a temp location before deleting the source tree.
+# gRPC stub compilation requires grpcio-tools which is not yet installed
+# at this point — it arrives with cedar-solve in step [3/5].  We copy the
+# proto file now and compile the stubs after cedar-solve is installed.
 PROTO_SRC="$CEDAR_DETECT_DIR/src/proto/cedar_detect.proto"
-STUB_DEST="$EFINDER_HOME/Solver"
-mkdir -p "$STUB_DEST"
-
+PROTO_TMP="/tmp/cedar_detect.proto"
 if [ -f "$PROTO_SRC" ]; then
-    python3 -m grpc_tools.protoc \
-        -I "$CEDAR_DETECT_DIR/src/proto" \
-        --python_out="$STUB_DEST" \
-        --grpc_python_out="$STUB_DEST" \
-        "$PROTO_SRC"
-    echo "  ✓ gRPC stubs compiled to $STUB_DEST"
-    ls "$STUB_DEST"/cedar_detect_pb2*.py
+    cp "$PROTO_SRC" "$PROTO_TMP"
+    echo "  Proto file saved to $PROTO_TMP for later stub compilation"
 else
     echo "ERROR: proto file not found at $PROTO_SRC"
     exit 1
@@ -204,6 +198,27 @@ if python3 -c "import tetra3; print('  tetra3 location:', tetra3.__file__)" 2>/d
     echo "  ✓ tetra3 importable from system Python"
 else
     echo "ERROR: 'import tetra3' failed"
+    exit 1
+fi
+
+# Compile gRPC Python stubs now that grpcio-tools is available (installed
+# via cedar-solve [dev] extra above).
+# eFinder_cedar_v2.py imports cedar_detect_pb2 and cedar_detect_pb2_grpc
+# from ~/Solver/ — these must be pre-compiled into the image.
+STUB_DEST="$EFINDER_HOME/Solver"
+mkdir -p "$STUB_DEST"
+
+if [ -f "$PROTO_TMP" ]; then
+    python3 -m grpc_tools.protoc \
+        -I "$(dirname $PROTO_TMP)" \
+        --python_out="$STUB_DEST" \
+        --grpc_python_out="$STUB_DEST" \
+        "$PROTO_TMP"
+    echo "  ✓ gRPC stubs compiled to $STUB_DEST"
+    ls "$STUB_DEST"/cedar_detect_pb2*.py
+    rm -f "$PROTO_TMP"
+else
+    echo "ERROR: proto file not found at $PROTO_TMP"
     exit 1
 fi
 
