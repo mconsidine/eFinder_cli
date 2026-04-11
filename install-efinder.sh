@@ -141,6 +141,21 @@ systemctl enable --root=/ apache2
 # Apache runs as www-data which has no journal read permission by default.
 usermod -aG systemd-journal www-data
 
+# Add efinder to systemd-journal group for interactive journalctl access.
+usermod -aG systemd-journal efinder
+
+# Grant efinder passwordless sudo for specific commands needed at runtime:
+#   date  — set system clock when SkySafari sends time sync
+#   systemctl restart efinder  — allow self-restart from web interface
+cat > /etc/sudoers.d/efinder << 'SUDOEOF'
+efinder ALL=(ALL) NOPASSWD: /bin/date
+efinder ALL=(ALL) NOPASSWD: /usr/bin/date
+efinder ALL=(ALL) NOPASSWD: /bin/systemctl restart efinder
+efinder ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart efinder
+SUDOEOF
+chmod 440 /etc/sudoers.d/efinder
+echo "  sudoers entry written for efinder"
+
 # Grant efinder user permission to control NetworkManager via polkit.
 # Without this, nmcli commands in ap.sh and station.sh fail with
 # "Not authorized to control networking" when run as the efinder user.
@@ -320,21 +335,42 @@ else
     fi
 fi
 
-# Show connection details
-sleep 2
-IP=$(hostname -I | awk '{print $1}')
+# Wait for DHCP to assign an IP (up to 15 seconds)
+echo "Waiting for IP address..."
+IP=""
+for i in $(seq 1 15); do
+    IP=$(ip -4 addr show wlan0 | grep -oP "(?<=inet )[\d.]+" | grep -v "192.168.50")
+    [ -n "$IP" ] && break
+    sleep 1
+done
+
+# Also try hostname -I as fallback
+if [ -z "$IP" ]; then
+    IP=$(hostname -I | awk '{print $1}')
+fi
+
 GATEWAY=$(ip route | grep default | awk '{print $3}')
 
 echo ""
-echo "Network Information:"
-echo "  IP Address: $IP"
-echo "  Gateway: $GATEWAY"
-echo "  DNS: $(grep nameserver /etc/resolv.conf | head -1 | awk '{print $2}')"
+echo "============================================"
+echo " Connected to: $SSID"
+echo "============================================"
 echo ""
-echo "You can now:"
-echo "  - SSH to this device: ssh efinder@$IP"
-echo "  - Access web interface: http://$IP/"
-echo "  - Run system updates: sudo apt update && sudo apt upgrade"
+echo "  IP Address : $IP"
+echo "  Hostname   : efinder.local"
+echo "  Gateway    : $GATEWAY"
+echo ""
+echo "  SSH access (from any device on $SSID):"
+echo "    ssh efinder@$IP"
+echo "    ssh efinder@efinder.local"
+echo ""
+echo "  Web interface:"
+echo "    http://$IP/"
+echo "    http://efinder.local/"
+echo ""
+echo "  NOTE: SkySafari cannot reach the eFinder"
+echo "        in station mode. Run ~/ap.sh to"
+echo "        restore AP mode for telescope use."
 echo ""
 echo "To return to AP mode: ~/ap.sh"
 EOF
@@ -363,6 +399,10 @@ sed -i 's/^\s*max_framebuffers=/#&/' "$BOOT_CONFIG" || true
 
 # Remove any existing eFinder additions
 sed -i '/^# --- eFinder additions/,/^enable_uart=1/d' "$BOOT_CONFIG" || true
+
+# Remove any existing dwc2 overlay lines — the base Pi OS image may include
+# dtoverlay=dwc2,dr_mode=host which conflicts with our peripheral mode entry.
+sed -i '/dtoverlay=dwc2/d' "$BOOT_CONFIG" || true
 
 # Add eFinder configuration
 cat >> "$BOOT_CONFIG" << 'EOF'
@@ -623,6 +663,14 @@ raspi-config nonint do_serial_cons 1 2>/dev/null || true
 # Enable getty on the USB CDC gadget serial port so tethered login works.
 # ttyGS0 is the Pi-side device created by g_cdc; the host sees /dev/ttyACM0.
 # serial-getty@.service is the correct template on Bookworm (not getty@).
+# Override default agetty with -L (no carrier detect) so the port opens
+# immediately on a virtual CDC ACM device without waiting for carrier signal.
+mkdir -p /etc/systemd/system/serial-getty@ttyGS0.service.d
+cat > /etc/systemd/system/serial-getty@ttyGS0.service.d/override.conf << 'GETTYEOF'
+[Service]
+ExecStart=
+ExecStart=-/sbin/agetty -L 115200 ttyGS0 vt100
+GETTYEOF
 systemctl enable --root=/ serial-getty@ttyGS0.service
 
 # Set hostname
