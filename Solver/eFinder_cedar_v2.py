@@ -8,20 +8,39 @@
 #   - Fully offline — no internet required at any boot.
 #   - Star detection: cedar-detect (Rust gRPC microservice, pre-built in image)
 #   - Plate solving: cedar-solve (pre-installed in image venv)
-#   - Database: cedar_database.npz pre-generated in image
+#   - Database: t3_fov14_mag8.npz pre-generated in image
 #   - gRPC stubs: pre-compiled into ~/Solver/ in image
 #
 # The cedar-detect-server systemd unit starts before this script.
 # It listens on localhost:50051.
+#
+# Mount integration (optional):
+#   Scenario A — no mount:
+#     Pi runs LX200 server on port 4060; SkySafari connects to Pi directly.
+#   Scenario B — OnStepX/FYSETC E4 mount via WiFi:
+#     Pi connects to mount on port 9999 and syncs after each solve.
+#     SkySafari connects to mount on port 9998.
+#     Pi's port-4060 LX200 server stays running as fallback.
+#   Scenario C — other mount via serial:
+#     Pi connects to /dev/ttyAMA0 (or configured port) and syncs after each solve.
+#     SkySafari continues to connect to Pi on port 4060.
+#
+#   To enable mount integration add to ~/Solver/eFinder.config:
+#     mount_mode:wifi        (wifi | serial | none)
+#     mount_host:192.168.0.1 (wifi only — IP of OnStepX controller)
+#     mount_port:9999        (wifi only — port on OnStepX, default 9999)
+#     mount_serial:/dev/ttyAMA0  (serial only)
+#     mount_baud:9600            (serial only)
 
 import os
 import sys
 import math
 import socket
+import serial as pyserial
 import time
 import csv
 from datetime import datetime
-from threading import Thread
+from threading import Thread, Lock
 from pathlib import Path
 
 import numpy as np
@@ -87,21 +106,37 @@ _detect_channel  = _make_detect_channel()
 _detect_stub     = cedar_detect_pb2_grpc.CedarDetectStub(_detect_channel)
 
 def get_centroids_cedar(np_image: np.ndarray) -> np.ndarray:
-    """Call cedar-detect gRPC server; return (N,2) array of (row,col) centroids."""
+    """Call cedar-detect gRPC server; return (N,2) array of (row,col) centroids.
+
+    cedar-detect 0.8.0 API:
+      Request:  CentroidsRequest
+                  input_image: Image(width, height, image_data)
+                  sigma, detect_hot_pixels (optional tuning)
+      Method:   ExtractCentroids
+      Response: CentroidsResult
+                  star_candidates[]: StarCentroid
+                    centroid_position: ImageCoord(x=col, y=row)
+                    brightness, num_saturated
+                  noise_estimate, peak_star_pixel
+    """
     global _detect_channel, _detect_stub
 
     assert np_image.dtype == np.uint8
     h, w = np_image.shape
 
-    request = cedar_detect_pb2.ImageRequest(
+    image = cedar_detect_pb2.Image(
+        width=w,
+        height=h,
         image_data=np_image.tobytes(),
-        image_width=w,
-        image_height=h,
-        bpp=8,
+    )
+    request = cedar_detect_pb2.CentroidsRequest(
+        input_image=image,
+        sigma=8.0,
+        detect_hot_pixels=True,
     )
 
     try:
-        response = _detect_stub.DetectStars(request, timeout=10.0)
+        response = _detect_stub.ExtractCentroids(request, timeout=10.0)
     except grpc.RpcError as e:
         print("cedar-detect gRPC error:", e.code(), e.details())
         print("Attempting to reconnect cedar-detect channel...")
@@ -113,9 +148,11 @@ def get_centroids_cedar(np_image: np.ndarray) -> np.ndarray:
         _detect_stub    = cedar_detect_pb2_grpc.CedarDetectStub(_detect_channel)
         return np.empty((0, 2), dtype=np.float64)
 
-    # cedar-detect returns (col, row); tetra3 expects (row, col), brightest-first.
+    # cedar-detect returns centroid_position.{x=col, y=row};
+    # tetra3 expects (row, col) order, brightest-first.
     centroids = np.array(
-        [(s.centroid_y, s.centroid_x) for s in response.star_centroids],
+        [(s.centroid_position.y, s.centroid_position.x)
+         for s in response.star_candidates],
         dtype=np.float64,
     )
     return centroids
@@ -234,6 +271,190 @@ if USE_ACCELEROMETER:
 else:
     altAngle = False
     print('Accelerometer disabled (USE_ACCELEROMETER = False)')
+
+# ---------------------------------------------------------------------------
+# Mount connection (optional)
+#
+# Reads mount_mode from eFinder.config:
+#   none   — no mount, Pi serves SkySafari directly on port 4060 (default)
+#   wifi   — OnStepX over TCP (FYSETC E4 or similar)
+#            Pi → mount_host:mount_port (default 9999)
+#            SkySafari → mount on port 9998
+#   serial — any LX200-compatible mount over serial
+#            Pi → mount_serial at mount_baud (default /dev/ttyAMA0 @ 9600)
+#            SkySafari → Pi on port 4060 as today
+#
+# In all cases the Pi's port-4060 LX200 server keeps running as fallback.
+# Mount sync is fire-and-forget — a failure never blocks the solve loop.
+# ---------------------------------------------------------------------------
+MOUNT_MODE   = param.get('mount_mode', 'none').lower().strip()
+MOUNT_HOST   = param.get('mount_host', '192.168.0.1').strip()
+MOUNT_PORT   = int(param.get('mount_port', '9999'))
+MOUNT_SERIAL = param.get('mount_serial', '/dev/ttyAMA0').strip()
+MOUNT_BAUD   = int(param.get('mount_baud', '9600'))
+
+_mount_lock      = Lock()   # serialises all LX200 commands to the mount
+_mount_wifi_sock = None     # TCP socket (wifi mode)
+_mount_serial    = None     # serial.Serial object (serial mode)
+
+
+def _format_lx200_ra(ra_deg):
+    """Convert RA in degrees to LX200 HH:MM:SS string."""
+    ra_h   = (ra_deg / 15.0) % 24.0
+    hh     = int(ra_h)
+    mm     = int((ra_h - hh) * 60)
+    ss     = int(((ra_h - hh) * 60 - mm) * 60)
+    return '%02d:%02d:%02d' % (hh, mm, ss)
+
+
+def _format_lx200_dec(dec_deg):
+    """Convert Dec in degrees to LX200 ±DD*MM:SS string."""
+    sign   = '+' if dec_deg >= 0 else '-'
+    d      = abs(dec_deg)
+    dd     = int(d)
+    mm     = int((d - dd) * 60)
+    ss     = int(((d - dd) * 60 - mm) * 60)
+    return '%s%02d*%02d:%02d' % (sign, dd, mm, ss)
+
+
+def _lx200_send_wifi(sock, cmd, expect_response=True):
+    """Send one LX200 command over TCP and return the response (or '')."""
+    try:
+        sock.sendall(cmd.encode('ascii'))
+        if expect_response:
+            return sock.recv(64).decode('ascii', errors='ignore')
+    except Exception:
+        pass
+    return ''
+
+
+def _lx200_send_serial(ser, cmd):
+    """Send one LX200 command over serial and return the response (or '')."""
+    try:
+        ser.reset_input_buffer()
+        ser.write(cmd.encode('ascii'))
+        response = b''
+        deadline = time.time() + 1.0
+        while time.time() < deadline:
+            if ser.in_waiting:
+                ch = ser.read(1)
+                response += ch
+                if ch in (b'#', b'0', b'1'):
+                    break
+        return response.decode('ascii', errors='ignore').rstrip('#')
+    except Exception:
+        return ''
+
+
+def _try_connect_mount():
+    """Attempt to open the mount connection. Returns True on success."""
+    global _mount_wifi_sock, _mount_serial
+
+    if MOUNT_MODE == 'none':
+        return False
+
+    if MOUNT_MODE == 'wifi':
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(3.0)
+            s.connect((MOUNT_HOST, MOUNT_PORT))
+            s.settimeout(1.0)
+            # Quick sanity-check — ask for firmware version
+            s.sendall(b':GVN#')
+            ver = s.recv(64).decode('ascii', errors='ignore')
+            _mount_wifi_sock = s
+            print('Mount (WiFi) connected: %s:%d  firmware=%s' % (
+                MOUNT_HOST, MOUNT_PORT, ver.strip('#')))
+            return True
+        except Exception as e:
+            print('Mount (WiFi) not reachable: %s — running without mount sync' % e)
+            _mount_wifi_sock = None
+            return False
+
+    if MOUNT_MODE == 'serial':
+        try:
+            ser = pyserial.Serial(
+                port=MOUNT_SERIAL, baudrate=MOUNT_BAUD,
+                timeout=1.0, write_timeout=1.0)
+            ser.reset_input_buffer()
+            ser.write(b':GVN#')
+            time.sleep(0.2)
+            ver = ser.read(ser.in_waiting or 1).decode('ascii', errors='ignore')
+            _mount_serial = ser
+            print('Mount (serial) connected: %s @ %d  firmware=%s' % (
+                MOUNT_SERIAL, MOUNT_BAUD, ver.strip('#')))
+            return True
+        except Exception as e:
+            print('Mount (serial) not available: %s — running without mount sync' % e)
+            _mount_serial = None
+            return False
+
+    print('Unknown mount_mode "%s" — running without mount sync' % MOUNT_MODE)
+    return False
+
+
+def _mount_connected():
+    if MOUNT_MODE == 'wifi':
+        return _mount_wifi_sock is not None
+    if MOUNT_MODE == 'serial':
+        return _mount_serial is not None
+    return False
+
+
+def push_to_mount(ra_deg, dec_deg):
+    """
+    Sync the mount to the plate-solved position.  Fire-and-forget — any
+    failure is logged but never propagates to the solve loop.
+
+    LX200 sync sequence:
+      :SrHH:MM:SS#   — set target RA
+      :Sd±DD*MM:SS#  — set target Dec
+      :CM#           — sync (Calibrate Mount)
+
+    The mount updates its internal pointing model to treat the current
+    position as (ra_deg, dec_deg).  The telescope does not move.
+    """
+    global _mount_wifi_sock, _mount_serial
+
+    if not _mount_connected():
+        return
+
+    ra_str  = _format_lx200_ra(ra_deg)
+    dec_str = _format_lx200_dec(dec_deg)
+
+    with _mount_lock:
+        try:
+            if MOUNT_MODE == 'wifi':
+                _lx200_send_wifi(_mount_wifi_sock, ':Sr%s#' % ra_str)
+                _lx200_send_wifi(_mount_wifi_sock, ':Sd%s#' % dec_str)
+                _lx200_send_wifi(_mount_wifi_sock, ':CM#')
+                print('Mount synced (WiFi): RA=%s Dec=%s' % (ra_str, dec_str))
+
+            elif MOUNT_MODE == 'serial':
+                _lx200_send_serial(_mount_serial, ':Sr%s#' % ra_str)
+                _lx200_send_serial(_mount_serial, ':Sd%s#' % dec_str)
+                _lx200_send_serial(_mount_serial, ':CM#')
+                print('Mount synced (serial): RA=%s Dec=%s' % (ra_str, dec_str))
+
+        except Exception as e:
+            print('Mount sync failed: %s — attempting reconnect' % e)
+            # Close and attempt reconnect for next solve
+            try:
+                if MOUNT_MODE == 'wifi' and _mount_wifi_sock:
+                    _mount_wifi_sock.close()
+                elif MOUNT_MODE == 'serial' and _mount_serial:
+                    _mount_serial.close()
+            except Exception:
+                pass
+            _mount_wifi_sock = None
+            _mount_serial    = None
+            # Reconnect in background so the solve loop is not delayed
+            Thread(target=_try_connect_mount, daemon=True).start()
+
+
+# Attempt initial mount connection at startup
+if MOUNT_MODE != 'none':
+    _try_connect_mount()
 
 # ---------------------------------------------------------------------------
 # Globals
@@ -357,6 +578,14 @@ def solveImage(img):
     print('JNow', coordinates.hh2dms(solved_radec[0] / 15),
           coordinates.dd2aligndms(solved_radec[1]))
     solve = True
+
+    # Push solved position to mount immediately after each successful solve.
+    # Fire-and-forget — runs in a daemon thread so the solve loop is not
+    # delayed if the mount is slow to respond or temporarily unreachable.
+    if _mount_connected():
+        Thread(target=push_to_mount,
+               args=(solved_radec[0], solved_radec[1]),
+               daemon=True).start()
 
 # ---------------------------------------------------------------------------
 # Image saving
@@ -527,7 +756,12 @@ def flipTestMode(mode):
     return '1'
 
 # ---------------------------------------------------------------------------
-# LX200 WiFi server
+# LX200 WiFi server (SkySafari interface — always runs on port 4060)
+#
+# In Scenario A (no mount) this is the primary interface.
+# In Scenario B (OnStepX WiFi) SkySafari connects to the mount directly on
+#   port 9998; this server stays running as a fallback.
+# In Scenario C (serial mount) SkySafari connects here as today.
 # ---------------------------------------------------------------------------
 def serveWifi():
     global solved_radec, keep, frame
@@ -672,17 +906,27 @@ def serveWifi():
 # ---------------------------------------------------------------------------
 print('eFinder version', version)
 print('cedar-detect server expected at', CEDAR_DETECT_ADDR)
+print('Mount mode: %s' % MOUNT_MODE)
+if MOUNT_MODE == 'wifi':
+    print('  Mount host: %s:%d' % (MOUNT_HOST, MOUNT_PORT))
+    print('  SkySafari: connect to mount on port 9998')
+elif MOUNT_MODE == 'serial':
+    print('  Mount serial: %s @ %d baud' % (MOUNT_SERIAL, MOUNT_BAUD))
+    print('  SkySafari: connect to this device on port 4060')
+else:
+    print('  SkySafari: connect to this device on port 4060')
+
 print('Starting solve loop...')
 solveloop = Thread(target=loop_solve, daemon=True)
 solveloop.start()
 time.sleep(0.5)
 
-print('Starting WiFi/LX200 server...')
+print('Starting WiFi/LX200 server on port 4060...')
 wifiloop = Thread(target=serveWifi, daemon=True)
 wifiloop.start()
 time.sleep(0.5)
 
-print('eFinder running — waiting for SkySafari connection on port 4060')
+print('eFinder running')
 
 try:
     while True:
@@ -690,3 +934,7 @@ try:
 except KeyboardInterrupt:
     print('eFinder stopped.')
     _detect_channel.close()
+    if _mount_wifi_sock:
+        _mount_wifi_sock.close()
+    if _mount_serial:
+        _mount_serial.close()

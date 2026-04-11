@@ -141,6 +141,21 @@ systemctl enable --root=/ apache2
 # Apache runs as www-data which has no journal read permission by default.
 usermod -aG systemd-journal www-data
 
+# Grant efinder user permission to control NetworkManager via polkit.
+# Without this, nmcli commands in ap.sh and station.sh fail with
+# "Not authorized to control networking" when run as the efinder user.
+mkdir -p /etc/polkit-1/rules.d
+cat > /etc/polkit-1/rules.d/50-efinder-nm.rules << 'POLKIT'
+polkit.addRule(function(action, subject) {
+    if (action.id.indexOf("org.freedesktop.NetworkManager.") == 0 &&
+        subject.user == "efinder") {
+        return polkit.Result.YES;
+    }
+});
+POLKIT
+chmod 644 /etc/polkit-1/rules.d/50-efinder-nm.rules
+echo "  polkit rule written for efinder NM control"
+
 echo "  Apache configured with 3600s timeout"
 
 echo ""

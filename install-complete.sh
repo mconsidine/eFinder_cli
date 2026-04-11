@@ -155,32 +155,14 @@ else
 fi
 
 echo "Performing final image slimming..."
-# Remove build-time dependencies (apt-managed)
-# Note: rustc/cargo here covers any apt-managed Rust; rustup-managed toolchain
-# is removed separately below.
-apt-get purge -y \
-    rustc cargo \
-    build-essential cmake pkg-config \
-    libssl-dev \
-    protobuf-compiler libprotobuf-dev \
-    libcfitsio-dev \
-    libjpeg-dev zlib1g-dev
+# Remove build-time dependencies
+apt-get purge -y rustc cargo build-essential cmake pkg-config libssl-dev
 # Remove packages orphaned by the purge
 apt-get autoremove -y
 # Clear out the local repository of retrieved package files
 apt-get clean
-# Remove man pages and documentation
+# Remove man pages and documentation (optional, but saves space)
 rm -rf /usr/share/doc/* /usr/share/man/* /usr/share/info/*
-
-# Remove rustup-managed toolchain — installed via sh.rustup.rs, NOT via apt,
-# so apt-get purge above does not touch it.  The Rust compiler and stdlib are
-# only needed at build time (cedar-detect-server binary is already installed).
-rm -rf /root/.cargo /root/.rustup
-echo "  rustup toolchain removed"
-
-# Remove pip wheel cache (apt clean only clears apt's cache, not pip's)
-rm -rf /root/.cache/pip
-echo "  pip cache cleared"
 
 # Installation complete
 echo ""
