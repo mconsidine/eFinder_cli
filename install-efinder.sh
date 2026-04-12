@@ -438,7 +438,7 @@ cat >> "$BOOT_CONFIG" << 'EOF'
 camera_auto_detect=0
 dtoverlay=imx477
 
-# USB gadget — enables CDC serial (/dev/ttyACM0 on host, /dev/ttyGS0 on Pi)
+# USB gadget serial — enables /dev/ttyUSB0 on host, /dev/ttyGS0 on Pi
 dtoverlay=dwc2,dr_mode=peripheral
 enable_uart=1
 EOF
@@ -447,13 +447,13 @@ echo "  Boot firmware configured for IMX477 camera and USB serial"
 
 # Configure cmdline for USB gadget
 CMDLINE=/boot/firmware/cmdline.txt
-# g_cdc (CDC composite) presents as /dev/ttyACM0 on the host, which is
-# the standard ACM serial device. g_serial presents as /dev/ttyUSB0 instead.
-if ! grep -q "modules-load=dwc2,g_cdc" "$CMDLINE"; then
-    # Remove any existing gadget module load
-    sed -i 's/ modules-load=dwc2,g_serial//' "$CMDLINE"
-    sed -i 's/rootwait/rootwait modules-load=dwc2,g_cdc/' "$CMDLINE"
-    echo "  Kernel command line updated for USB CDC serial (ttyACM0)"
+# g_serial presents as /dev/ttyUSB0 on the host — simple, reliable,
+# no carrier detect issues, no ModemManager interference.
+if ! grep -q "modules-load=dwc2,g_serial" "$CMDLINE"; then
+    # Remove any existing g_cdc entry if present
+    sed -i 's/ modules-load=dwc2,g_cdc//' "$CMDLINE"
+    sed -i 's/rootwait/rootwait modules-load=dwc2,g_serial/' "$CMDLINE"
+    echo "  Kernel command line updated for USB serial (ttyUSB0)"
 fi
 
 echo ""
@@ -686,17 +686,9 @@ raspi-config nonint do_i2c 0 2>/dev/null || true
 # Disable serial console on hardware UART (keep UART enabled for USB gadget)
 raspi-config nonint do_serial_cons 1 2>/dev/null || true
 
-# Enable getty on the USB CDC gadget serial port so tethered login works.
-# ttyGS0 is the Pi-side device created by g_cdc; the host sees /dev/ttyACM0.
-# serial-getty@.service is the correct template on Bookworm (not getty@).
-# Override default agetty with -L (no carrier detect) so the port opens
-# immediately on a virtual CDC ACM device without waiting for carrier signal.
-mkdir -p /etc/systemd/system/serial-getty@ttyGS0.service.d
-cat > /etc/systemd/system/serial-getty@ttyGS0.service.d/override.conf << 'GETTYEOF'
-[Service]
-ExecStart=
-ExecStart=-/sbin/agetty -L -i 115200 ttyGS0
-GETTYEOF
+# Enable getty on the USB serial gadget port so tethered login works.
+# ttyGS0 is the Pi-side device created by g_serial; the host sees /dev/ttyUSB0.
+# g_serial has no carrier detect issues — standard serial-getty works as-is.
 systemctl enable --root=/ serial-getty@ttyGS0.service
 
 # Set hostname
