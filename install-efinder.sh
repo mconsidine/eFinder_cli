@@ -50,8 +50,9 @@ fi
 echo ""
 echo "[2/10] Deploying application files..."
 
-# Copy Python scripts
-find "$REPO_DIR/Solver" -maxdepth 1 -type f \( -name "*.py" -o -name "*.csv" -o -name "*.ttf" -o -name "*.npy" -o -name "*.config" \) \
+# Copy Python scripts and supporting files from Solver/ subdirectory
+find "$REPO_DIR/Solver" -maxdepth 1 -type f \
+    \( -name "*.py" -o -name "*.csv" -o -name "*.ttf" -o -name "*.npy" -o -name "*.config" \) \
     -exec cp {} "$EFINDER_HOME/Solver/" \;
 
 chown -R "$EFINDER_USER:$EFINDER_USER" "$EFINDER_HOME/Solver"
