@@ -78,20 +78,44 @@ cp "$REPO_DIR/Solver/www/stream.php" /var/www/html/
 # inline python3 -c strings containing < > and triple-quoted HTML.
 apt-get install -y --no-install-recommends python3-markdown 2>/dev/null || true
 cat > /tmp/md2html.py << 'MD2HTML'
-import markdown, sys
+import markdown, sys, re
+
+# Night-vision CSS: black background, red text, red code blocks.
+# Keeps eyes dark-adapted during telescope sessions.
 CSS = (
-    "body{font-family:sans-serif;max-width:900px;margin:2em auto;padding:0 1em;}"
-    "code{background:#f4f4f4;padding:2px 4px;border-radius:3px;}"
-    "pre{background:#f4f4f4;padding:1em;overflow-x:auto;border-radius:4px;}"
+    "body{font-family:sans-serif;max-width:900px;margin:2em auto;padding:0 1em;"
+    "background:#000;color:#cc0000;}"
+    "h1,h2,h3,h4,h5,h6{color:#ff2200;}"
+    "a{color:#ff4400;}"
+    "code{background:#1a0000;color:#ff4400;padding:2px 4px;border-radius:3px;}"
+    "pre{background:#1a0000;color:#ff4400;padding:1em;overflow-x:auto;"
+    "border-radius:4px;border:1px solid #440000;}"
     "table{border-collapse:collapse;width:100%;}"
-    "th,td{border:1px solid #ddd;padding:6px 10px;text-align:left;}"
-    "th{background:#f0f0f0;}"
+    "th,td{border:1px solid #440000;padding:6px 10px;text-align:left;}"
+    "th{background:#1a0000;color:#ff2200;}"
+    "strong,b{color:#ff2200;}"
+    "hr{border-color:#440000;}"
 )
+
 with open(sys.argv[1]) as f:
     body = f.read()
+
+# Strip emoji — they render as boxes on systems without emoji fonts,
+# which is common on headless Pi browsers and mobile at night.
+body = re.sub(
+    r'[🌀-🧿'   # misc symbols, emoticons
+    r'☀-➿'    # misc technical/dingbats
+    r'🨀-🪟'    # chess, tools etc
+    r'☀-➿]+',         # narrow range fallback
+    '', body
+)
+# Clean up any double spaces left by emoji removal
+body = re.sub(r'  +', ' ', body)
+
 html = markdown.markdown(body, extensions=["fenced_code", "tables"])
 with open(sys.argv[2], "w") as f:
     f.write("<!DOCTYPE html><html><head>")
+    f.write('<meta charset="UTF-8">')
     f.write('<meta name="viewport" content="width=device-width,initial-scale=1">')
     f.write("<style>" + CSS + "</style></head><body>")
     f.write(html)
@@ -105,6 +129,7 @@ cp "$REPO_DIR/Solver/www/api/state.php" /var/www/html/api/
 cp "$REPO_DIR/Solver/www/api/status.php" /var/www/html/api/
 cp "$REPO_DIR/Solver/www/api/focus.php" /var/www/html/api/
 cp "$REPO_DIR/Solver/www/api/calibrate.php" /var/www/html/api/
+cp "$REPO_DIR/Solver/www/api/lx200cmd.php" /var/www/html/api/
 
 # Set permissions
 chown -R www-data:www-data /var/www/html/
@@ -669,7 +694,7 @@ mkdir -p /etc/systemd/system/serial-getty@ttyGS0.service.d
 cat > /etc/systemd/system/serial-getty@ttyGS0.service.d/override.conf << 'GETTYEOF'
 [Service]
 ExecStart=
-ExecStart=-/sbin/agetty -L 115200 ttyGS0 vt100
+ExecStart=-/sbin/agetty -L -i 115200 ttyGS0
 GETTYEOF
 systemctl enable --root=/ serial-getty@ttyGS0.service
 

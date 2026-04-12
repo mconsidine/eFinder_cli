@@ -42,6 +42,7 @@ apt-get install -y --no-install-recommends \
     git curl wget unzip \
     python3-pip python3-venv \
     python3-serial python3-smbus python3-picamera2 python3-scipy python3-numpy \
+    avahi-daemon libnss-mdns \
     libjpeg-dev zlib1g-dev \
     samba samba-common-bin \
     apache2 php8.2 libapache2-mod-php8.2 \
@@ -70,6 +71,16 @@ echo "  Installing Pillow via pip (avoids apt dist-info/RECORD conflict)..."
 # --only-binary=:all: uses a pre-built wheel, avoiding any source compile.
 # Pillow >=9 — no upper bound, installs latest compatible wheel.
 pip3 install --break-system-packages "Pillow>=9.0" --only-binary=:all:
+
+echo ""
+echo "  Installing Adafruit packages for optional accelerometer support..."
+# These are installed regardless of whether an accelerometer is physically
+# present. The import is guarded by USE_ACCELEROMETER at runtime so there
+# is no overhead when disabled. Installing here avoids a rebuild if the
+# user later adds an ADXL343 to the I2C bus.
+pip3 install --break-system-packages \
+    adafruit-blinka \
+    adafruit-circuitpython-adxl34x
 
 echo ""
 echo "  Pinning numpy and scipy to system apt versions..."
