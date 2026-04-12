@@ -121,26 +121,24 @@ jobs:
 
       - name: Create installation instructions
         run: |
-          cat > INSTALL.txt << 'INSTRUCTIONS'
-          eFinder Enhanced Edition - Installation Instructions
-          
-          1. Download the .img.xz file from artifacts
-          2. Flash to 16GB+ microSD card using:
-             - Raspberry Pi Imager, or
-             - Etcher, or
-             - Command line: xzcat image.img.xz | sudo dd of=/dev/sdX bs=4M status=progress
-          
-          3. Insert SD card in Pi Zero 2W and power on
-          4. Wait 60 seconds for boot
-          5. Connect to WiFi: efinderXXXX (password: 12345678)
-          6. Browse to: http://192.168.50.1/
-          
-          Default credentials:
-          - SSH: efinder / 12345678
-          - Samba: efinder / 12345678
-          
-          See README.md for full documentation.
-          INSTRUCTIONS
+          printf '%s\n' \
+            'eFinder Enhanced Edition - Installation Instructions' \
+            '' \
+            '1. Download the .img.xz file from artifacts' \
+            '2. Flash to 16GB+ microSD card using Raspberry Pi Imager' \
+            '   or: xzcat image.img.xz | sudo dd of=/dev/sdX bs=4M status=progress' \
+            '' \
+            '3. Insert SD card in Pi Zero 2W and power on' \
+            '4. Wait 60 seconds for boot' \
+            '5. Connect to WiFi: efinderXXXX (password: 12345678)' \
+            '6. Browse to: http://192.168.50.1/' \
+            '' \
+            'Default credentials:' \
+            '  SSH: efinder / 12345678' \
+            '  Samba: efinder / 12345678' \
+            '' \
+            'See README.md for full documentation.' \
+            > INSTALL.txt
 
       - name: Upload instructions
         uses: actions/upload-artifact@v4
