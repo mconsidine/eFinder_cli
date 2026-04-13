@@ -1,7 +1,20 @@
 name: tiny_img Build eFinder RPi Image v2
-
 on:
+  push:
+    branches: [ tiny_img ]
   workflow_dispatch:
+    inputs:
+      pi_os_date:
+        description: 'Pi OS release date (YYYY-MM-DD)'
+        required: true
+        default: '2025-11-24'
+      wifi_password:
+        description: 'WiFi AP password'
+        required: true
+        default: '12345678'
+
+#on:
+#  workflow_dispatch:
 
 jobs:
   build:
