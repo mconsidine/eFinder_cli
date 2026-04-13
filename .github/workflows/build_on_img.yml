@@ -1,4 +1,4 @@
-name: Build eFinder RPi Image v2
+name: tiny_img Build eFinder RPi Image v2
 
 on:
   workflow_dispatch:
