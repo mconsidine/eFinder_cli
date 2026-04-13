@@ -119,12 +119,11 @@ cd "$EFINDER_HOME"
 if [ ! -d "$REPO_DIR" ]; then
     sudo -u "$EFINDER_USER" git clone --branch tinySS "$REPO_URL" "$REPO_DIR"
 else
-    echo "  Repo already present — fetching latest tinySS..."
-    sudo -u "$EFINDER_USER" git -C "$REPO_DIR" fetch origin refs/heads/tinySS:refs/remotes/origin/tinySS
-    sudo -u "$EFINDER_USER" git -C "$REPO_DIR" checkout -b tinySS origin/tinySS 2>/dev/null || \
-    sudo -u "$EFINDER_USER" git -C "$REPO_DIR" checkout tinySS
-    sudo -u "$EFINDER_USER" git -C "$REPO_DIR" pull origin tinySS
+    echo "  Repo already present — removing and recloning..."
+    sudo rm -rf "$REPO_DIR"
+    sudo -u "$EFINDER_USER" git clone --branch tinySS "$REPO_URL" "$REPO_DIR"
 fi
+
 # ---------------------------------------------------------------------------
 # 4. Directory structure and file deployment
 # ---------------------------------------------------------------------------
