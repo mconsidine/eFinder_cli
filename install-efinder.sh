@@ -56,6 +56,8 @@ find "$REPO_DIR/Solver" -maxdepth 1 -type f \
     -exec cp {} "$EFINDER_HOME/Solver/" \;
 
 chown -R "$EFINDER_USER:$EFINDER_USER" "$EFINDER_HOME/Solver"
+# Also copy the standalone LX200 server script
+cp "$REPO_DIR/eFinder_server.py" "$EFINDER_HOME/Solver/"
 echo "  Application files deployed to $EFINDER_HOME/Solver/"
 
 echo ""
@@ -647,6 +649,7 @@ systemctl enable --root=/ cedar-detect.service
 echo "  cedar-detect service installed and enabled"
 
 # Create eFinder systemd service
+# eFinder solver service (camera + solve loop)
 cat > /etc/systemd/system/efinder.service << 'EOF'
 [Unit]
 Description=eFinder telescope plate solver
@@ -669,11 +672,34 @@ StandardError=journal
 WantedBy=multi-user.target
 EOF
 
-# Enable service using --root=/ so it works without a running systemd
-# (daemon-reload is not needed when using --root=/)
 systemctl enable --root=/ efinder.service
+echo "  eFinder solver service installed and enabled"
 
-echo "  eFinder service installed and enabled"
+# eFinder server service (LX200 WiFi server — no camera)
+cat > /etc/systemd/system/efinder-server.service << 'EOF'
+[Unit]
+Description=eFinder LX200 WiFi server
+After=network-online.target efinder.service
+Wants=network-online.target
+StartLimitIntervalSec=120
+StartLimitBurst=4
+
+[Service]
+Type=simple
+User=efinder
+WorkingDirectory=/home/efinder/Solver
+ExecStart=/usr/bin/python3 /home/efinder/Solver/eFinder_server.py
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl enable --root=/ efinder-server.service
+echo "  eFinder server service installed and enabled"
 
 # Configure SSH
 sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config

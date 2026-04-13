@@ -236,15 +236,19 @@ class Coordinates:
         return r, d
 
     def hh2dms(self, dd):
-        minutes, seconds = divmod(abs(dd) * 3600, 60)
-        degrees, minutes = divmod(minutes, 60)
-        return '%02d:%02d:%02d' % (degrees, minutes, seconds)
+        # LX200 Classic RA format: HH:MM.T (hours, minutes, tenths)
+        total_minutes = abs(dd) * 60.0
+        hours = int(total_minutes // 60)
+        mins  = total_minutes % 60
+        return '%02d:%04.1f' % (hours, mins)
 
     def dd2aligndms(self, dd):
-        sign             = '+' if dd >= 0 else '-'
-        minutes, seconds = divmod(abs(dd) * 3600, 60)
-        degrees, minutes = divmod(minutes, 60)
-        return '%s%02d*%02d:%02d' % (sign, degrees, minutes, seconds)
+        # LX200 Classic Dec format: sDD*MM (no seconds)
+        sign    = '+' if dd >= 0 else '-'
+        d       = abs(dd)
+        degrees = int(d)
+        minutes = int((d - degrees) * 60)
+        return '%s%02d*%02d' % (sign, degrees, minutes)
 
     def dd2dms(self, dd):
         sign             = '+' if dd >= 0 else '-'
@@ -806,14 +810,11 @@ def loop_solve():
     while True:
         if not offset_flag:
             capture()
+            time.sleep(0)   # yield GIL to WiFi thread after capture
             solveImage(capArray)
+            time.sleep(0)   # yield GIL to WiFi thread after solve
             _write_live_image(capArray)
             print('****************')
-            # Pace the solve loop — 1s minimum between iterations.
-            # Reduces idle CPU from ~100% to ~20-30% with no meaningful
-            # impact on plate-solving responsiveness. The camera exposure
-            # time itself is typically 0.1-0.5s so total loop time is
-            # already >1s when stars are present and solving is active.
             time.sleep(1.0)
         else:
             time.sleep(0.05)
@@ -966,12 +967,19 @@ def flipTestMode(mode):
 # In Scenario C (serial mount) SkySafari connects here as today.
 # ---------------------------------------------------------------------------
 def serveWifi():
+    """LX200 WiFi server for SkySafari.
+
+    SkySafari opens a new TCP connection for every command/response pair —
+    it does not maintain a persistent connection. We therefore accept a
+    connection, read all available data, process each command and send
+    responses, then close and accept the next connection.
+    """
     global solved_radec, keep, frame
     print('Starting WiFi/LX200 server on port 4060')
-    host    = ''
-    port    = 4060
-    size    = 1024
-    s       = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    host = ''
+    port = 4060
+    size = 1024
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     s.bind((host, port))
     s.listen(50)
@@ -979,138 +987,146 @@ def serveWifi():
     timeOffset = '0'
     timeStr    = '23:00:00'
 
+    STATE_FILE = '/dev/shm/efinder_state.json'
+
+    def _get_radec():
+        """Read current RA/Dec from state file written by solve process."""
+        try:
+            with open(STATE_FILE) as f:
+                st = _json.load(f)
+            return float(st.get('ra', 0.0)) * 15.0, float(st.get('dec', 0.0))
+        except Exception:
+            return solved_radec
+
     while True:
         try:
             client, address = s.accept()
-            print('SkySafari connected from', address)
-            while True:
+            client.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            client.settimeout(1.0)
+            try:
                 data = client.recv(size)
-                if not data:
-                    break
-                pkt = data.decode("utf-8", "ignore")
-                time.sleep(0.02)
-                raPacket  = coordinates.hh2dms(solved_radec[0] / 15) + '#'
-                decPacket = coordinates.dd2aligndms(solved_radec[1]) + '#'
-                for x in pkt.split('#'):
-                    if not x:
-                        continue
-                    cmd = x[1:3]
-                    if   x == ':GR':
-                        client.send(raPacket.encode('ascii'))
-                    elif x == ':GD':
-                        client.send(decPacket.encode('ascii'))
-                    elif cmd == 'St':
+            except socket.timeout:
+                client.close()
+                continue
+            if not data:
+                client.close()
+                continue
+
+            pkt = data.decode("utf-8", "ignore")
+            ra_deg, dec_deg = _get_radec()
+            raPacket  = coordinates.hh2dms(ra_deg / 15) + '#'
+            decPacket = coordinates.dd2aligndms(dec_deg) + '#'
+
+            for x in pkt.split('#'):
+                if not x:
+                    continue
+                cmd = x[1:3]
+                if   x == ':GR':
+                    client.send(raPacket.encode('ascii'))
+                elif x == ':GD':
+                    client.send(decPacket.encode('ascii'))
+                elif cmd == 'St':
+                    client.send(b'1')
+                    lat = x[3:].split('*')
+                    Lat = int(lat[0]) + int(lat[1]) / 60
+                elif cmd == 'Sg':
+                    client.send(b'1')
+                    lon = x[3:].split('*')
+                    Long = int(lon[0]) + int(lon[1]) / 60
+                elif cmd == 'SG':
+                    if len(x) > 5:
                         client.send(b'1')
-                        lat = x[3:].split('*')
-                        Lat = int(lat[0]) + int(lat[1]) / 60
-                    elif cmd == 'Sg':
-                        client.send(b'1')
-                        lon = x[3:].split('*')
-                        Long = int(lon[0]) + int(lon[1]) / 60
-                    elif cmd == 'SG':
-                        if len(x) > 5:
-                            client.send(b'1')
-                            timeOffset = x[3:]
-                        else:
-                            client.send((':SG' + adjGain(float(x[3:5])) + '#').encode('ascii'))
-                    elif cmd == 'SL':
-                        client.send(b'1')
-                        timeStr = x[3:]
-                    elif cmd == 'SC':
-                        client.send(b'Updating Planetary Data#                              #')
-                        print('dateSet', timeOffset, timeStr, x[3:])
-                        coordinates.dateSet(timeOffset, timeStr, x[3:])
-                    elif cmd == 'RG':
-                        selectExp(0.1, 10)
-                    elif cmd == 'RC':
-                        selectExp(0.1, 20)
-                    elif cmd == 'RM':
-                        selectExp(0.2, 20)
-                    elif cmd == 'RS':
-                        selectExp(0.5, 30)
-                    elif cmd == 'Sr':
-                        raStr = x[3:]
-                        client.send(b'1')
-                    elif cmd == 'Sd':
-                        decStr = x[3:]
-                        client.send(b'1')
-                    elif cmd == 'MS':
-                        client.send(b'0')
-                    elif cmd == 'Ms':
-                        adjExp(-1)
-                    elif cmd == 'Mn':
-                        adjExp(1)
-                    elif cmd == 'Mw':
-                        keep  = False
-                        frame = 0
-                    elif cmd == 'Me':
-                        print('Started saving images')
-                        keep = True
-                    elif cmd == 'CM':
-                        client.send(b'0')
-                        measure_offset()
-                        ra  = raStr.split(':')
-                        targetRa = int(ra[0]) + int(ra[1]) / 60 + int(ra[2]) / 3600
-                        dec = decStr.split('*')
-                        decdec = dec[1].split(':')
-                        targetDec = int(dec[0]) + math.copysign(
-                            int(decdec[0]) / 60 + int(decdec[1]) / 3600,
-                            float(dec[0]))
-                        print('Align target:', targetRa, targetDec)
-                    elif x and x[-1] == 'Q':
-                        print('Stop saving images')
-                        keep = False
-                    elif cmd == 'PS':
-                        client.send((':PS' + go_solve() + '#').encode('ascii'))
-                    elif cmd == 'OF':
-                        client.send((':OF' + measure_offset() + '#').encode('ascii'))
-                    elif cmd == 'GV':
-                        client.send((':GV' + version + '#').encode('ascii'))
-                    elif cmd == 'GO':
-                        client.send((':GO' + offset_str + '#').encode('ascii'))
-                    elif cmd == 'SO':
-                        client.send((':SO' + reset_offset() + '#').encode('ascii'))
-                    elif cmd == 'GS':
-                        client.send((':GS' + str(stars) + '#').encode('ascii'))
-                    elif cmd == 'GK':
-                        client.send((':GK' + str(peak) + '#').encode('ascii'))
-                    elif cmd == 'Gt':
-                        client.send((':Gt' + eTime + '#').encode('ascii'))
-                    elif cmd == 'SE':
-                        client.send((':SE' + adjExp(float(x[3:5])) + '#').encode('ascii'))
-                    elif cmd == 'SX':
-                        client.send((':SX' + setExp(x.strip('#')[3:]) + '#').encode('ascii'))
-                    elif cmd == 'GX':
-                        client.send((':GX' + getAutoExp() + '#').encode('ascii'))
-                    elif cmd == 'GA':
-                        client.send((':GA' + getScopeAlt() + '#').encode('ascii'))
-                    elif cmd == 'IM':
-                        client.send((':IM' + startImage(x.strip('#')[3:4]) + '#').encode('ascii'))
-                    elif cmd == 'TS':
-                        client.send((':TS' + flipTestMode(True) + '#').encode('ascii'))
-                    elif cmd == 'TO':
-                        client.send((':TO' + flipTestMode(False) + '#').encode('ascii'))
-                    elif cmd == 'AC':
-                        result = '1' if enable_accelerometer() else '0'
-                        client.send((':AC' + result + '#').encode('ascii'))
-                    elif cmd == 'AD':
-                        disable_accelerometer()
-                        client.send((':AD1#').encode('ascii'))
-                    elif cmd == 'AG':
-                        # Get accelerometer state: 1=enabled, 0=disabled
-                        client.send((':AG' + ('1' if altAngle else '0') + '#').encode('ascii'))
-            print('SkySafari disconnected')
+                        timeOffset = x[3:]
+                    else:
+                        client.send((':SG' + adjGain(float(x[3:5])) + '#').encode('ascii'))
+                elif cmd == 'SL':
+                    client.send(b'1')
+                    timeStr = x[3:]
+                elif cmd == 'SC':
+                    client.send(b'Updating Planetary Data#                              #')
+                    print('dateSet', timeOffset, timeStr, x[3:])
+                    Thread(target=coordinates.dateSet,
+                           args=(timeOffset, timeStr, x[3:]),
+                           daemon=True).start()
+                elif cmd == 'RG':
+                    selectExp(0.1, 10)
+                elif cmd == 'RC':
+                    selectExp(0.1, 20)
+                elif cmd == 'RM':
+                    selectExp(0.2, 20)
+                elif cmd == 'RS':
+                    selectExp(0.5, 30)
+                elif cmd == 'Sr':
+                    raStr = x[3:]
+                    client.send(b'1')
+                elif cmd == 'Sd':
+                    decStr = x[3:]
+                    client.send(b'1')
+                elif cmd == 'MS':
+                    client.send(b'0')
+                elif cmd == 'Ms':
+                    adjExp(-1)
+                elif cmd == 'Mn':
+                    adjExp(1)
+                elif cmd == 'Mw':
+                    keep  = False
+                    frame = 0
+                elif cmd == 'Me':
+                    print('Started saving images')
+                    keep = True
+                elif cmd == 'CM':
+                    client.send(b'0')
+                    ra  = raStr.split(':')
+                    targetRa = int(ra[0]) + int(ra[1]) / 60 + int(ra[2]) / 3600
+                    dec = decStr.split('*')
+                    decdec = dec[1].split(':')
+                    targetDec = int(dec[0]) + math.copysign(
+                        int(decdec[0]) / 60 + int(decdec[1]) / 3600,
+                        float(dec[0]))
+                    print('Align target:', targetRa, targetDec)
+                    Thread(target=measure_offset, daemon=True).start()
+                elif x and x[-1] == 'Q':
+                    keep = False
+                elif cmd == 'PS':
+                    client.send((':PS' + go_solve() + '#').encode('ascii'))
+                elif cmd == 'OF':
+                    client.send((':OF' + measure_offset() + '#').encode('ascii'))
+                elif cmd == 'GV':
+                    client.send((':GV' + version + '#').encode('ascii'))
+                elif cmd == 'GO':
+                    client.send((':GO' + offset_str + '#').encode('ascii'))
+                elif cmd == 'SO':
+                    client.send((':SO' + reset_offset() + '#').encode('ascii'))
+                elif cmd == 'GS':
+                    client.send((':GS' + str(stars) + '#').encode('ascii'))
+                elif cmd == 'GK':
+                    client.send((':GK' + str(peak) + '#').encode('ascii'))
+                elif cmd == 'Gt':
+                    client.send((':Gt' + eTime + '#').encode('ascii'))
+                elif cmd == 'SE':
+                    client.send((':SE' + adjExp(float(x[3:5])) + '#').encode('ascii'))
+                elif cmd == 'SX':
+                    client.send((':SX' + setExp(x.strip('#')[3:]) + '#').encode('ascii'))
+                elif cmd == 'GX':
+                    client.send((':GX' + getAutoExp() + '#').encode('ascii'))
+                elif cmd == 'GA':
+                    client.send((':GA' + getScopeAlt() + '#').encode('ascii'))
+                elif cmd == 'IM':
+                    client.send((':IM' + startImage(x.strip('#')[3:4]) + '#').encode('ascii'))
+                elif cmd == 'TS':
+                    client.send((':TS' + flipTestMode(True) + '#').encode('ascii'))
+                elif cmd == 'TO':
+                    client.send((':TO' + flipTestMode(False) + '#').encode('ascii'))
+
+            client.close()
+
         except Exception as e:
             print('WiFi server error:', e)
-            print('Restarting WiFi server socket...')
             try:
-                s.close()
+                client.close()
             except Exception:
                 pass
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            s.bind((host, port))
-            s.listen(50)
+
 
 # ---------------------------------------------------------------------------
 # Main
@@ -1127,23 +1143,14 @@ elif MOUNT_MODE == 'serial':
 else:
     print('  SkySafari: connect to this device on port 4060')
 
-print('Starting solve loop...')
-solveloop = Thread(target=loop_solve, daemon=True)
-solveloop.start()
-time.sleep(0.5)
-
-print('Starting WiFi/LX200 server on port 4060...')
-wifiloop = Thread(target=serveWifi, daemon=True)
-wifiloop.start()
-time.sleep(0.5)
-
-print('eFinder running')
-
+# This script runs the solve loop only.
+# The LX200 WiFi server runs as a separate process: eFinder_server.py
+# State is shared via /dev/shm/efinder_state.json
+print('Starting solve loop (solver-only mode)...')
 try:
-    while True:
-        time.sleep(60)
+    loop_solve()
 except KeyboardInterrupt:
-    print('eFinder stopped.')
+    print('eFinder solver stopped.')
     _detect_channel.close()
     if _mount_wifi_sock:
         _mount_wifi_sock.close()
