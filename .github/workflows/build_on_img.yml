@@ -53,16 +53,12 @@ jobs:
           sudo mount ${LOOP}p1 /mnt/pi/boot/firmware
 
           # ------------------------------------------------------------------
-          # Create efinder user by writing directly to /etc/passwd,
-          # /etc/shadow, /etc/group, /etc/gshadow.
-          # No chroot execution needed — avoids Exec format error on
-          # x86_64 runner trying to run aarch64 binaries.
-          # mkpasswd (whois package) generates a SHA-512 shadow hash.
+          # Create efinder user by writing directly to the user database files.
+          # No chroot execution — avoids Exec format error on x86_64 runner.
           # ------------------------------------------------------------------
           HASHED=$(mkpasswd -m sha-512 "12345678")
 
-          # Remove any existing UID 1000 user (the Lite image has no default
-          # user but be safe) to avoid duplicate UID conflicts.
+          # Remove any existing UID 1000 user to avoid conflicts
           sudo sed -i '/^[^:]*:[^:]*:1000:[^:]*:/d' /mnt/pi/etc/passwd  || true
           sudo sed -i '/^[^:]*:[^:]*:1000:/d'        /mnt/pi/etc/shadow  || true
           sudo sed -i '/^[^:]*:[^:]*:1000:/d'        /mnt/pi/etc/group   || true
@@ -71,23 +67,16 @@ jobs:
           EF_UID=1000
           EF_GID=1000
 
-          # passwd entry: user:x:uid:gid:gecos:home:shell
           echo "efinder:x:${EF_UID}:${EF_GID}::/home/efinder:/bin/bash" | \
               sudo tee -a /mnt/pi/etc/passwd > /dev/null
-
-          # shadow entry: user:hash:lastchg:min:max:warn:inactive:expire:reserved
           echo "efinder:${HASHED}:19000:0:99999:7:::" | \
               sudo tee -a /mnt/pi/etc/shadow > /dev/null
-
-          # group entry: add efinder group and append efinder to system groups
           echo "efinder:x:${EF_GID}:" | \
               sudo tee -a /mnt/pi/etc/group > /dev/null
-
-          # gshadow entry
           echo "efinder:!:::" | \
               sudo tee -a /mnt/pi/etc/gshadow > /dev/null
 
-          # Add efinder to supplementary groups (sudo, video, gpio, i2c, spi, dialout)
+          # Add efinder to supplementary groups
           for GRP in sudo video gpio i2c spi dialout; do
               if grep -q "^${GRP}:" /mnt/pi/etc/group; then
                   LINE=$(grep "^${GRP}:" /mnt/pi/etc/group)
@@ -99,7 +88,6 @@ jobs:
               fi
           done
 
-          # Create home directory
           sudo mkdir -p /mnt/pi/home/efinder
           echo "  efinder user created (UID=$EF_UID)"
 
@@ -111,13 +99,56 @@ jobs:
           echo "  hostname set to efinder"
 
           # ------------------------------------------------------------------
-          # Enable SSH
+          # Enable SSH with password authentication
           # ------------------------------------------------------------------
           sudo touch /mnt/pi/boot/firmware/ssh
           sudo sed -i \
               's/^#*PasswordAuthentication.*/PasswordAuthentication yes/' \
               /mnt/pi/etc/ssh/sshd_config
-          echo "  SSH enabled with password authentication"
+          echo "  SSH enabled"
+
+          # ------------------------------------------------------------------
+          # Boot firmware — camera overlay and USB serial gadget
+          # Baked in at build time so tether works on very first boot,
+          # before install.sh has run.
+          # ------------------------------------------------------------------
+          BOOT_CONFIG=/mnt/pi/boot/firmware/config.txt
+
+          # Disable VC4 KMS (conflicts with camera)
+          sudo sed -i -e '/^\s*dtoverlay=vc4-kms-v3d/s/^/#/' \
+                      -e '/^\s*max_framebuffers=/s/^/#/' \
+                      "$BOOT_CONFIG"
+
+          echo ""                                           | sudo tee -a "$BOOT_CONFIG" > /dev/null
+          echo "# --- eFinder additions ---"               | sudo tee -a "$BOOT_CONFIG" > /dev/null
+          echo "# IMX477 camera"                           | sudo tee -a "$BOOT_CONFIG" > /dev/null
+          echo "camera_auto_detect=0"                      | sudo tee -a "$BOOT_CONFIG" > /dev/null
+          echo "dtoverlay=imx477"                          | sudo tee -a "$BOOT_CONFIG" > /dev/null
+          echo ""                                          | sudo tee -a "$BOOT_CONFIG" > /dev/null
+          echo "# USB serial gadget (/dev/ttyUSB0 on host, /dev/ttyGS0 on Pi)" | sudo tee -a "$BOOT_CONFIG" > /dev/null
+          echo "dtoverlay=dwc2,dr_mode=peripheral"         | sudo tee -a "$BOOT_CONFIG" > /dev/null
+          echo "enable_uart=1"                             | sudo tee -a "$BOOT_CONFIG" > /dev/null
+          echo "  config.txt updated"
+
+          CMDLINE=/mnt/pi/boot/firmware/cmdline.txt
+          sudo sed -i 's/rootwait/rootwait modules-load=dwc2,g_serial/' "$CMDLINE"
+          echo "  cmdline.txt updated"
+
+          # ------------------------------------------------------------------
+          # Enable serial getty on ttyGS0 so screen gets a login prompt.
+          # Written with echo lines — no heredoc.
+          # ------------------------------------------------------------------
+          sudo mkdir -p /mnt/pi/etc/systemd/system/serial-getty@ttyGS0.service.d
+          GETTY_OVERRIDE=/mnt/pi/etc/systemd/system/serial-getty@ttyGS0.service.d/override.conf
+          echo "[Service]"                                     | sudo tee    "$GETTY_OVERRIDE" > /dev/null
+          echo "ExecStart="                                    | sudo tee -a "$GETTY_OVERRIDE" > /dev/null
+          echo "ExecStart=-/sbin/agetty -L -i 115200 ttyGS0" | sudo tee -a "$GETTY_OVERRIDE" > /dev/null
+
+          sudo mkdir -p /mnt/pi/etc/systemd/system/multi-user.target.wants
+          sudo ln -sf \
+              /lib/systemd/system/serial-getty@.service \
+              /mnt/pi/etc/systemd/system/multi-user.target.wants/serial-getty@ttyGS0.service
+          echo "  serial-getty@ttyGS0 enabled"
 
           # ------------------------------------------------------------------
           # Stage application files
@@ -136,11 +167,8 @@ jobs:
           sudo install -m 644 Solver/eFinder.config \
               /mnt/pi/home/efinder/Solver/eFinder.config
 
-          # Stage install.sh at repo root and in home for convenience
           sudo install -m 755 install.sh \
               /mnt/pi/home/efinder/install.sh
-
-          # stage station.sh so it is available before install.sh runs
           sudo install -m 755 station.sh \
               /mnt/pi/home/efinder/station.sh
 
