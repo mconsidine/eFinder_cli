@@ -1,20 +1,14 @@
-name: tiny_img Build eFinder RPi Image v2
+name: tiny_img Build eFinder RPi Image
+
 on:
   push:
     branches: [ tiny_img ]
   workflow_dispatch:
     inputs:
-      pi_os_date:
-        description: 'Pi OS release date (YYYY-MM-DD)'
-        required: true
-        default: '2025-11-24'
       wifi_password:
         description: 'WiFi AP password'
         required: true
         default: '12345678'
-
-#on:
-#  workflow_dispatch:
 
 jobs:
   build:
@@ -22,7 +16,7 @@ jobs:
     steps:
 
       - name: Checkout repo
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Free up runner disk space
         run: |
@@ -45,12 +39,6 @@ jobs:
         run: |
           printf 'WIFI_PASS="12345678"\nSAMBA_PASS="12345678"\n' > config.env
 
-      - name: Write firstrun.sh and firstrun.service
-        run: |
-          echo IyEvYmluL2Jhc2gKc2V0IC1lCkxPRz0vaG9tZS9lZmluZGVyL2ZpcnN0cnVuLmxvZwpleGVjID4gPih0ZWUgLWEgIiRMT0ciKSAyPiYxCgplY2hvICI9PT0gZUZpbmRlciBmaXJzdC1ib290IHNldHVwOiAkKGRhdGUpID09PSIKCiMgV2FpdCBmb3IgaW50ZXJuZXQgYmVmb3JlIGF0dGVtcHRpbmcgZ2l0IGNsb25lCmVjaG8gIldhaXRpbmcgZm9yIGludGVybmV0IGNvbm5lY3Rpdml0eS4uLiIKY29ubmVjdGVkPWZhbHNlCmZvciBpIGluICQoc2VxIDEgMzApOyBkbwogICAgaWYgcGluZyAtYzEgLVcyIGdpdGh1Yi5jb20gJj4vZGV2L251bGw7IHRoZW4KICAgICAgICBjb25uZWN0ZWQ9dHJ1ZQogICAgICAgIGVjaG8gIiAgSW50ZXJuZXQgcmVhY2hhYmxlIGFmdGVyIGF0dGVtcHQgJGkiCiAgICAgICAgYnJlYWsKICAgIGZpCiAgICBlY2hvICIgIGF0dGVtcHQgJGkvMzAgLS0gcmV0cnlpbmcgaW4gMTBzLi4uIgogICAgc2xlZXAgMTAKZG9uZQoKaWYgWyAiJGNvbm5lY3RlZCIgIT0gInRydWUiIF07IHRoZW4KICAgIGVjaG8gIkVSUk9SOiBObyBpbnRlcm5ldCBhZnRlciA1IG1pbnV0ZXMgLS0gYWJvcnRpbmcgZmlyc3QtYm9vdCBzZXR1cC4iCiAgICBlY2hvICIgICAgICAgRW5zdXJlIHRoZSBQaSBoYXMgV2lGaSBvciBVU0IgZXRoZXJuZXQgb24gZmlyc3QgYm9vdC4iCiAgICBleGl0IDEKZmkKCiMgRml4IG93bmVyc2hpcCBub3cgdGhhdCB0aGUgZWZpbmRlciB1c2VyIGV4aXN0cyBhdCBydW50aW1lCmNob3duIC1SIGVmaW5kZXI6ZWZpbmRlciAvaG9tZS9lZmluZGVyCgojIExvYWQgYmFrZWQtaW4gY3JlZGVudGlhbHMgZnJvbSBjb25maWcuZW52CnNvdXJjZSAvaG9tZS9lZmluZGVyL2NvbmZpZy5lbnYKZXhwb3J0IFdJRklfUEFTUyBTQU1CQV9QQVNTCgojIENsb25lIHRoZSByZXBvIHRvIGdldCB0aGUgbGF0ZXN0IGluc3RhbGwuc2ggYW5kIFNvbHZlciBmaWxlcwpjZCAvaG9tZS9lZmluZGVyCmlmIFsgLWQgZWZpbmRlci1yZXBvIF07IHRoZW4KICAgIGVjaG8gIlJlcG8gYWxyZWFkeSBwcmVzZW50IC0tIHB1bGxpbmcgbGF0ZXN0Li4uIgogICAgZ2l0IC1DIGVmaW5kZXItcmVwbyBwdWxsIG9yaWdpbgplbHNlCiAgICBnaXQgY2xvbmUgaHR0cHM6Ly9naXRodWIuY29tL21jb25zaWRpbmUvZUZpbmRlcl9jbGkuZ2l0IGVmaW5kZXItcmVwbwpmaQoKIyBFbnN1cmUgcmVwbyBmaWxlcyBhcmUgb3duZWQgYnkgZWZpbmRlciwgbm90IHJvb3QKY2hvd24gLVIgZWZpbmRlcjplZmluZGVyIC9ob21lL2VmaW5kZXIvZWZpbmRlci1yZXBvCgojIFJ1biBpbnN0YWxsZXIgbm9uLWludGVyYWN0aXZlbHkKYmFzaCAvaG9tZS9lZmluZGVyL2VmaW5kZXItcmVwby9pbnN0YWxsLnNoIC0tbm9uLWludGVyYWN0aXZlCgojIFJlbW92ZSB0cmlnZ2VyIGZpbGUgLS0gZmlyc3RydW4uc2VydmljZSBza2lwcyBvbiBhbGwgc3Vic2VxdWVudCBib290cy4KIyBUbyByZS1ydW46IHRvdWNoIC9ob21lL2VmaW5kZXIvLnJ1bl9maXJzdHJ1biAmJiBzdWRvIHJlYm9vdApybSAtZiAvaG9tZS9lZmluZGVyLy5ydW5fZmlyc3RydW4KCmVjaG8gIj09PSBlRmluZGVyIGZpcnN0LWJvb3Qgc2V0dXAgY29tcGxldGU6ICQoZGF0ZSkgPT09IgpyZWJvb3QK | base64 -d > firstrun.sh
-          chmod +x firstrun.sh
-          echo W1VuaXRdCkRlc2NyaXB0aW9uPWVGaW5kZXIgZmlyc3QtYm9vdCBzZXR1cApBZnRlcj1uZXR3b3JrLW9ubGluZS50YXJnZXQKV2FudHM9bmV0d29yay1vbmxpbmUudGFyZ2V0CkNvbmRpdGlvblBhdGhFeGlzdHM9L2hvbWUvZWZpbmRlci8ucnVuX2ZpcnN0cnVuCgpbU2VydmljZV0KVHlwZT1vbmVzaG90CkV4ZWNTdGFydD0vdXNyL2xvY2FsL2Jpbi9maXJzdHJ1bi5zaApSZW1haW5BZnRlckV4aXQ9eWVzClN0YW5kYXJkT3V0cHV0PWpvdXJuYWwrY29uc29sZQpTdGFuZGFyZEVycm9yPWpvdXJuYWwrY29uc29sZQpUaW1lb3V0U3RhcnRTZWM9MTgwMAoKW0luc3RhbGxdCldhbnRlZEJ5PW11bHRpLXVzZXIudGFyZ2V0Cg== | base64 -d > firstrun.service
-
       - name: Mount and customize image
         run: |
           IMAGE=2025-11-24-raspios-bookworm-arm64-lite.img
@@ -70,8 +58,7 @@ jobs:
 
           sudo mkdir -p /mnt/pi/home/efinder/Solver
 
-          sudo install -m 755 install.sh \
-              /mnt/pi/home/efinder/install.sh
+          # Application files
           sudo install -m 755 Solver/eFinder.py \
               /mnt/pi/home/efinder/Solver/eFinder.py
           sudo install -m 644 Solver/starnames.csv \
@@ -83,22 +70,28 @@ jobs:
           sudo install -m 644 Solver/eFinder.config \
               /mnt/pi/home/efinder/Solver/eFinder.config
 
+          # Credentials baked in — install.sh sources these at runtime
           sudo install -m 600 config.env \
               /mnt/pi/home/efinder/config.env
 
+          # First-boot script — stored in repo as plain text, no base64
           sudo install -m 755 firstrun.sh \
               /mnt/pi/usr/local/bin/firstrun.sh
+
+          # firstrun.service unit file — stored in repo as plain text
           sudo install -m 644 firstrun.service \
               /mnt/pi/etc/systemd/system/firstrun.service
 
+          # Enable SSH on first boot
           sudo touch /mnt/pi/boot/firmware/ssh
 
-          sudo mkdir -p \
-              /mnt/pi/etc/systemd/system/multi-user.target.wants
+          # Enable firstrun.service
+          sudo mkdir -p /mnt/pi/etc/systemd/system/multi-user.target.wants
           sudo ln -sf \
               /etc/systemd/system/firstrun.service \
               /mnt/pi/etc/systemd/system/multi-user.target.wants/firstrun.service
 
+          # Trigger file — firstrun.service fires once then removes it
           sudo touch /mnt/pi/home/efinder/.run_firstrun
 
           sudo umount /mnt/pi/boot/firmware
@@ -117,7 +110,7 @@ jobs:
           echo "ARTIFACT_NAME=efinder_zero_$(date +%Y%m%d)" >> $GITHUB_ENV
 
       - name: Upload image artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ARTIFACT_NAME }}
           path: 2025-11-24-raspios-bookworm-arm64-lite.img.xz
