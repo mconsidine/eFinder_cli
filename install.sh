@@ -101,6 +101,7 @@ sudo apt-get upgrade -y
 echo ""
 echo "[2/9] Installing required packages..."
 sudo apt-get install -y \
+    git \
     python3-pip \
     python3-pil \
     python3-smbus \
