@@ -90,22 +90,12 @@ jobs:
           # Add efinder to supplementary groups (sudo, video, gpio, i2c, spi, dialout)
           for GRP in sudo video gpio i2c spi dialout; do
               if grep -q "^${GRP}:" /mnt/pi/etc/group; then
-                  sudo python3 -c "
-import re, sys
-grp = sys.argv[1]
-lines = open('/mnt/pi/etc/group').readlines()
-out = []
-for line in lines:
-    if line.startswith(grp + ':'):
-        line = line.rstrip('\n')
-        if line.endswith(':'):
-            line = line + 'efinder'
-        else:
-            line = line + ',efinder'
-        line = line + '\n'
-    out.append(line)
-open('/mnt/pi/etc/group', 'w').writelines(out)
-" "$GRP"
+                  LINE=$(grep "^${GRP}:" /mnt/pi/etc/group)
+                  if echo "$LINE" | grep -q ":$"; then
+                      sudo sed -i "s|^${GRP}:.*|${LINE}efinder|" /mnt/pi/etc/group
+                  else
+                      sudo sed -i "s|^${GRP}:.*|${LINE},efinder|" /mnt/pi/etc/group
+                  fi
               fi
           done
 
