@@ -61,13 +61,18 @@ jobs:
           # ------------------------------------------------------------------
           HASHED=$(mkpasswd -m sha-512 "12345678")
 
-          # Choose a UID/GID that doesn't conflict with the base image.
-          # 1000 is the default first user slot on Raspberry Pi OS.
-          EUID=1000
-          EGID=1000
+          # Remove any existing UID 1000 user (the Lite image has no default
+          # user but be safe) to avoid duplicate UID conflicts.
+          sudo sed -i '/^[^:]*:[^:]*:1000:[^:]*:/d' /mnt/pi/etc/passwd  || true
+          sudo sed -i '/^[^:]*:[^:]*:1000:/d'        /mnt/pi/etc/shadow  || true
+          sudo sed -i '/^[^:]*:[^:]*:1000:/d'        /mnt/pi/etc/group   || true
+          sudo sed -i '/^[^:]*:[^:]*:1000:/d'        /mnt/pi/etc/gshadow || true
+
+          EF_UID=1000
+          EF_GID=1000
 
           # passwd entry: user:x:uid:gid:gecos:home:shell
-          echo "efinder:x:${EUID}:${EGID}::/home/efinder:/bin/bash" | \
+          echo "efinder:x:${EF_UID}:${EF_GID}::/home/efinder:/bin/bash" | \
               sudo tee -a /mnt/pi/etc/passwd > /dev/null
 
           # shadow entry: user:hash:lastchg:min:max:warn:inactive:expire:reserved
@@ -75,7 +80,7 @@ jobs:
               sudo tee -a /mnt/pi/etc/shadow > /dev/null
 
           # group entry: add efinder group and append efinder to system groups
-          echo "efinder:x:${EGID}:" | \
+          echo "efinder:x:${EF_GID}:" | \
               sudo tee -a /mnt/pi/etc/group > /dev/null
 
           # gshadow entry
@@ -83,20 +88,30 @@ jobs:
               sudo tee -a /mnt/pi/etc/gshadow > /dev/null
 
           # Add efinder to supplementary groups (sudo, video, gpio, i2c, spi, dialout)
-          # Each group line is: name:password:gid:members
-          # If members field is empty append efinder; if non-empty append ,efinder
           for GRP in sudo video gpio i2c spi dialout; do
               if grep -q "^${GRP}:" /mnt/pi/etc/group; then
-                  # If line ends with : (no members yet), just append efinder
-                  # Otherwise append ,efinder
-                  sudo sed -i "/^${GRP}:/ { /[^:]$/ s/$/,efinder/; /:\$/ s/$/efinder/ }" \
-                      /mnt/pi/etc/group
+                  sudo python3 -c "
+import re, sys
+grp = sys.argv[1]
+lines = open('/mnt/pi/etc/group').readlines()
+out = []
+for line in lines:
+    if line.startswith(grp + ':'):
+        line = line.rstrip('\n')
+        if line.endswith(':'):
+            line = line + 'efinder'
+        else:
+            line = line + ',efinder'
+        line = line + '\n'
+    out.append(line)
+open('/mnt/pi/etc/group', 'w').writelines(out)
+" "$GRP"
               fi
           done
 
           # Create home directory
           sudo mkdir -p /mnt/pi/home/efinder
-          echo "  efinder user created (UID=$EUID)"
+          echo "  efinder user created (UID=$EF_UID)"
 
           # ------------------------------------------------------------------
           # Set hostname to efinder
@@ -142,9 +157,7 @@ jobs:
           # ------------------------------------------------------------------
           # Fix ownership
           # ------------------------------------------------------------------
-          EFINDER_UID=$(grep "^efinder:" /mnt/pi/etc/passwd | cut -d: -f3)
-          EFINDER_GID=$(grep "^efinder:" /mnt/pi/etc/passwd | cut -d: -f4)
-          sudo chown -R "${EFINDER_UID}:${EFINDER_GID}" /mnt/pi/home/efinder
+          sudo chown -R "${EF_UID}:${EF_GID}" /mnt/pi/home/efinder
 
           sudo umount /mnt/pi/boot/firmware
           sudo umount /mnt/pi
