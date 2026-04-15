@@ -27,17 +27,13 @@ jobs:
       - name: Install required tools
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y parted e2fsprogs
+          sudo apt-get install -y parted e2fsprogs whois
 
       - name: Download official Raspberry Pi OS Lite
         run: |
           wget -q \
             https://downloads.raspberrypi.org/raspios_oldstable_lite_arm64/images/raspios_oldstable_lite_arm64-2025-11-24/2025-11-24-raspios-bookworm-arm64-lite.img.xz
           xz -d 2025-11-24-raspios-bookworm-arm64-lite.img.xz
-
-      - name: Write config.env
-        run: |
-          printf 'WIFI_PASS="12345678"\nSAMBA_PASS="12345678"\n' > config.env
 
       - name: Mount and customize image
         run: |
@@ -56,9 +52,39 @@ jobs:
           sudo mount ${LOOP}p2 /mnt/pi
           sudo mount ${LOOP}p1 /mnt/pi/boot/firmware
 
-          sudo mkdir -p /mnt/pi/home/efinder/Solver
+          # ------------------------------------------------------------------
+          # Create efinder user with password 12345678
+          # mkpasswd (from whois package) generates a SHA-512 shadow hash
+          # ------------------------------------------------------------------
+          HASHED=$(mkpasswd -m sha-512 "12345678")
+          sudo chroot /mnt/pi useradd -m -s /bin/bash \
+              -p "$HASHED" \
+              -G sudo,video,gpio,i2c,spi,dialout \
+              efinder
+          echo "  efinder user created"
 
-          # Application files
+          # ------------------------------------------------------------------
+          # Set hostname to efinder
+          # ------------------------------------------------------------------
+          echo "efinder" | sudo tee /mnt/pi/etc/hostname > /dev/null
+          sudo sed -i 's/raspberrypi/efinder/g' /mnt/pi/etc/hosts
+          echo "  hostname set to efinder"
+
+          # ------------------------------------------------------------------
+          # Enable SSH
+          # ------------------------------------------------------------------
+          sudo touch /mnt/pi/boot/firmware/ssh
+          sudo sed -i \
+              's/^#*PasswordAuthentication.*/PasswordAuthentication yes/' \
+              /mnt/pi/etc/ssh/sshd_config
+          echo "  SSH enabled with password authentication"
+
+          # ------------------------------------------------------------------
+          # Stage application files
+          # ------------------------------------------------------------------
+          sudo mkdir -p /mnt/pi/home/efinder/Solver
+          sudo mkdir -p /mnt/pi/home/efinder/uploads
+
           sudo install -m 755 Solver/eFinder.py \
               /mnt/pi/home/efinder/Solver/eFinder.py
           sudo install -m 644 Solver/starnames.csv \
@@ -70,29 +96,20 @@ jobs:
           sudo install -m 644 Solver/eFinder.config \
               /mnt/pi/home/efinder/Solver/eFinder.config
 
-          # Credentials baked in — install.sh sources these at runtime
-          sudo install -m 600 config.env \
-              /mnt/pi/home/efinder/config.env
+          # Stage install.sh at repo root and in home for convenience
+          sudo install -m 755 install.sh \
+              /mnt/pi/home/efinder/install.sh
 
-          # First-boot script — stored in repo as plain text, no base64
-          sudo install -m 755 firstrun.sh \
-              /mnt/pi/usr/local/bin/firstrun.sh
+          # stage station.sh so it is available before install.sh runs
+          sudo install -m 755 station.sh \
+              /mnt/pi/home/efinder/station.sh
 
-          # firstrun.service unit file — stored in repo as plain text
-          sudo install -m 644 firstrun.service \
-              /mnt/pi/etc/systemd/system/firstrun.service
-
-          # Enable SSH on first boot
-          sudo touch /mnt/pi/boot/firmware/ssh
-
-          # Enable firstrun.service
-          sudo mkdir -p /mnt/pi/etc/systemd/system/multi-user.target.wants
-          sudo ln -sf \
-              /etc/systemd/system/firstrun.service \
-              /mnt/pi/etc/systemd/system/multi-user.target.wants/firstrun.service
-
-          # Trigger file — firstrun.service fires once then removes it
-          sudo touch /mnt/pi/home/efinder/.run_firstrun
+          # ------------------------------------------------------------------
+          # Fix ownership
+          # ------------------------------------------------------------------
+          EFINDER_UID=$(grep "^efinder:" /mnt/pi/etc/passwd | cut -d: -f3)
+          EFINDER_GID=$(grep "^efinder:" /mnt/pi/etc/passwd | cut -d: -f4)
+          sudo chown -R "${EFINDER_UID}:${EFINDER_GID}" /mnt/pi/home/efinder
 
           sudo umount /mnt/pi/boot/firmware
           sudo umount /mnt/pi
