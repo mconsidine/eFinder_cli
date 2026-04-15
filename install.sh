@@ -110,7 +110,13 @@ sudo apt-get install -y \
     samba-common-bin \
     apache2 \
     php8.2 \
-    libapache2-mod-php8.2
+    libapache2-mod-php8.2 \
+    libjpeg-dev \
+    zlib1g-dev \
+    libtiff-dev \
+    libfreetype-dev \
+    liblcms2-dev \
+    libwebp-dev
 
 # ---------------------------------------------------------------------------
 # 2. Python virtual environment
@@ -119,7 +125,10 @@ echo ""
 echo "[3/9] Setting up Python virtual environment..."
 sudo -u "$EFINDER_USER" python3 -m venv "$VENV" --system-site-packages
 "$VENV/bin/pip" install --upgrade pip
-"$VENV/bin/pip" install \
+# Install Pillow first with --prefer-binary so pip uses a pre-built wheel
+# rather than compiling from source (which requires libjpeg-dev etc.)
+"$VENV/bin/pip" install --prefer-binary Pillow
+"$VENV/bin/pip" install --prefer-binary \
     grpcio \
     cedar-solve \
     pyserial
