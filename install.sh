@@ -591,6 +591,23 @@ sudo rm -f /etc/cron.d/efinder
 echo "  All services installed and enabled."
 
 # ---------------------------------------------------------------------------
+# Slim the image — remove build-time tools and package cache
+# ---------------------------------------------------------------------------
+echo ""
+echo "[slim] Removing build-time packages and cleaning cache..."
+sudo apt-get purge -y \
+    protobuf-compiler \
+    build-essential \
+    cmake \
+    pkg-config \
+    libssl-dev \
+    2>/dev/null || true
+sudo apt-get autoremove -y
+sudo apt-get clean
+sudo rm -rf /usr/share/doc/* /usr/share/man/* /usr/share/info/*
+echo "  Done."
+
+# ---------------------------------------------------------------------------
 # Done
 # ---------------------------------------------------------------------------
 echo ""
