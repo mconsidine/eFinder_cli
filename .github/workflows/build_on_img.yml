@@ -53,15 +53,50 @@ jobs:
           sudo mount ${LOOP}p1 /mnt/pi/boot/firmware
 
           # ------------------------------------------------------------------
-          # Create efinder user with password 12345678
-          # mkpasswd (from whois package) generates a SHA-512 shadow hash
+          # Create efinder user by writing directly to /etc/passwd,
+          # /etc/shadow, /etc/group, /etc/gshadow.
+          # No chroot execution needed — avoids Exec format error on
+          # x86_64 runner trying to run aarch64 binaries.
+          # mkpasswd (whois package) generates a SHA-512 shadow hash.
           # ------------------------------------------------------------------
           HASHED=$(mkpasswd -m sha-512 "12345678")
-          sudo chroot /mnt/pi useradd -m -s /bin/bash \
-              -p "$HASHED" \
-              -G sudo,video,gpio,i2c,spi,dialout \
-              efinder
-          echo "  efinder user created"
+
+          # Choose a UID/GID that doesn't conflict with the base image.
+          # 1000 is the default first user slot on Raspberry Pi OS.
+          EUID=1000
+          EGID=1000
+
+          # passwd entry: user:x:uid:gid:gecos:home:shell
+          echo "efinder:x:${EUID}:${EGID}::/home/efinder:/bin/bash" | \
+              sudo tee -a /mnt/pi/etc/passwd > /dev/null
+
+          # shadow entry: user:hash:lastchg:min:max:warn:inactive:expire:reserved
+          echo "efinder:${HASHED}:19000:0:99999:7:::" | \
+              sudo tee -a /mnt/pi/etc/shadow > /dev/null
+
+          # group entry: add efinder group and append efinder to system groups
+          echo "efinder:x:${EGID}:" | \
+              sudo tee -a /mnt/pi/etc/group > /dev/null
+
+          # gshadow entry
+          echo "efinder:!:::" | \
+              sudo tee -a /mnt/pi/etc/gshadow > /dev/null
+
+          # Add efinder to supplementary groups (sudo, video, gpio, i2c, spi, dialout)
+          # Each group line is: name:password:gid:members
+          # If members field is empty append efinder; if non-empty append ,efinder
+          for GRP in sudo video gpio i2c spi dialout; do
+              if grep -q "^${GRP}:" /mnt/pi/etc/group; then
+                  # If line ends with : (no members yet), just append efinder
+                  # Otherwise append ,efinder
+                  sudo sed -i "/^${GRP}:/ { /[^:]$/ s/$/,efinder/; /:\$/ s/$/efinder/ }" \
+                      /mnt/pi/etc/group
+              fi
+          done
+
+          # Create home directory
+          sudo mkdir -p /mnt/pi/home/efinder
+          echo "  efinder user created (UID=$EUID)"
 
           # ------------------------------------------------------------------
           # Set hostname to efinder
