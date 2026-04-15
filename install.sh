@@ -78,6 +78,22 @@ fi
 # 1. System update & packages
 # ---------------------------------------------------------------------------
 echo ""
+echo "[0/9] Waiting for system clock sync..."
+# Pi Zero 2W has no RTC -- clock may be wrong until NTP syncs.
+# Apt will reject package lists if the system time is behind their
+# release date, so we wait up to 60s for timesyncd to sync.
+sudo systemctl restart systemd-timesyncd
+for i in $(seq 1 12); do
+    if timedatectl status 2>/dev/null | grep -q "System clock synchronized: yes"; then
+        echo "  Clock synced."
+        break
+    fi
+    echo "  Waiting for NTP sync... ($i/12)"
+    sleep 5
+done
+timedatectl status | grep "System clock" || true
+
+echo ""
 echo "[1/9] Updating system packages..."
 sudo apt-get update -q
 sudo apt-get upgrade -y
