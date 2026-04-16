@@ -12,17 +12,12 @@ for f in /var/lib/systemd/rfkill/*:wlan; do
     [ -f "$f" ] && echo 0 | sudo tee "$f" > /dev/null
 done
 
-# Check if country code is already set.
-# raspi-config do_wifi_country requires a reboot to take effect --
-# if not yet set, set it now and reboot. Re-run station.sh after reboot.
+# Set WiFi country code if somehow not already set (should be US from image).
 CURRENT_COUNTRY=$(iw reg get 2>/dev/null | grep -oP '(?<=country )\w+' | head -1)
 if [ "$CURRENT_COUNTRY" = "00" ] || [ -z "$CURRENT_COUNTRY" ]; then
-    echo "  WiFi country code not set -- setting to US and rebooting."
-    echo "  Re-run ~/station.sh after reboot."
+    echo "  WiFi country code not set -- setting to US."
     sudo raspi-config nonint do_wifi_country US 2>/dev/null || true
-    sleep 2
-    sudo reboot
-    exit 0
+    echo "  If WiFi still does not work, reboot and try again."
 fi
 
 # Restart NetworkManager so it picks up the unblocked radio
@@ -32,11 +27,11 @@ sleep 3
 # Confirm wlan0 is present
 if ! ip link show wlan0 &>/dev/null; then
     echo "ERROR: wlan0 not found after radio unblock."
-    echo "       Check that the Pi has a WiFi module and the overlay is loaded."
+    echo "       Try rebooting: sudo reboot"
     exit 1
 fi
 
-echo "WiFi radio ready (country: $CURRENT_COUNTRY)"
+echo "WiFi radio ready (country: $(iw reg get 2>/dev/null | grep -oP '(?<=country )\w+' | head -1))"
 echo ""
 
 if [ -z "$1" ]; then

@@ -258,7 +258,7 @@ def solver_process(shm_name, frame_ready, cam_cmd_q, cam_result_q,
         req = cedar_detect_pb2.CentroidsRequest(
             input_image=cedar_detect_pb2.Image(
                 width=w, height=h, image_data=img.tobytes()),
-            sigma=8.0, detect_hot_pixels=True,
+            sigma=10.0, detect_hot_pixels=True,
         )
         try:
             resp = _stub.ExtractCentroids(req, timeout=10.0)
@@ -276,7 +276,7 @@ def solver_process(shm_name, frame_ready, cam_cmd_q, cam_result_q,
 
     # --- tetra3 ---
     print('[solver] loading cedar-solve database...')
-    t3 = tetra3.Tetra3('t3_fov14_mag8')
+    t3 = tetra3.Tetra3('efinder-tetra-database')
     print('[solver] cedar-solve ready')
 
     try:
@@ -316,7 +316,7 @@ def solver_process(shm_name, frame_ready, cam_cmd_q, cam_result_q,
 
     offset = _build_offset()
 
-    MAX_CENTROIDS = 30
+    MAX_CENTROIDS = 20
 
     # solver state
     solve        = False
@@ -419,7 +419,7 @@ def solver_process(shm_name, frame_ready, cam_cmd_q, cam_result_q,
                       target_pixel=offset, return_matches=True)
         if solve and solved_radec != (0.0, 0.0):
             kwargs['ra_dec_center'] = solved_radec
-            kwargs['search_radius'] = 8.0
+            kwargs['search_radius'] = 4.0
 
         sol = t3.solve_from_centroids(centroids, (FRAME_H, FRAME_W), **kwargs)
         if sol['RA'] is None and 'ra_dec_center' in kwargs:
@@ -651,13 +651,13 @@ def solver_process(shm_name, frame_ready, cam_cmd_q, cam_result_q,
             _do_solve(img)
             _write_live(img)
             print('[solver] ****************')
-            time.sleep(1.0)
 
 # ===========================================================================
 # PROCESS 3 - LX200 / WiFi server
 # ===========================================================================
 def lx200_process(lx200_cmd_q, lx200_result_q,
-                  shared_ra, shared_dec, offset_flag, test_mode):
+                  shared_ra, shared_dec, offset_flag, test_mode,
+                  accel_enabled):
     """
     Serves SkySafari on port 4060.
     Reads ra/dec directly from shared Values - no IPC latency on hot path.
@@ -680,6 +680,11 @@ def lx200_process(lx200_cmd_q, lx200_result_q,
     def disable_accel():
         nonlocal altAngle, angle
         altAngle = False; angle = None
+
+    # Auto-enable accelerometer at startup if config flag is set.
+    # Packages are always installed — graceful fallback if hardware absent.
+    if accel_enabled.value:
+        enable_accel()
 
     def get_alt():
         if not altAngle: return '-2'
@@ -850,6 +855,11 @@ def main():
     offset_flag = Value(ctypes.c_bool, False)
     test_mode   = Value(ctypes.c_bool, False)
 
+    # Read accelerometer flag from config so lx200 process knows at startup
+    _param = load_param()
+    accel_enabled = Value(ctypes.c_bool,
+        str(_param.get('accelerometer', 'false')).strip().lower() == 'true')
+
     # queues and events
     frame_ready    = Event()
     cam_cmd_q      = Queue()
@@ -871,7 +881,8 @@ def main():
         'lx200': Process(
             target=lx200_process,
             args=(lx200_cmd_q, lx200_result_q,
-                  shared_ra, shared_dec, offset_flag, test_mode),
+                  shared_ra, shared_dec, offset_flag, test_mode,
+                  accel_enabled),
             name='eFinder-lx200', daemon=True),
     }
 
