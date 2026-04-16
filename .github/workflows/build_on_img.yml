@@ -24,10 +24,88 @@ jobs:
                       /opt/ghc /opt/hostedtoolcache/CodeQL
           df -h
 
-      - name: Install required tools
+      - name: Install host tools
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y parted e2fsprogs whois
+          sudo apt-get install -y \
+            parted e2fsprogs whois \
+            gcc-aarch64-linux-gnu \
+            protobuf-compiler \
+            python3-pip
+
+      # -----------------------------------------------------------------------
+      # Cross-compile cedar-detect-server for aarch64 on the x86_64 runner.
+      # The Pi never needs Rust installed.
+      # -----------------------------------------------------------------------
+      - name: Install Rust toolchain
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          source "$HOME/.cargo/env"
+          rustup target add aarch64-unknown-linux-gnu
+
+      - name: Clone cedar-detect
+        run: |
+          git clone --depth 1 https://github.com/smroid/cedar-detect.git
+
+      - name: Cache cedar-detect build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            cedar-detect/target
+          key: cedar-detect-aarch64-${{ hashFiles('cedar-detect/Cargo.toml') }}
+          restore-keys: cedar-detect-aarch64-
+
+      - name: Cross-compile cedar-detect-server for aarch64
+        run: |
+          source "$HOME/.cargo/env"
+          cd cedar-detect
+          export PKG_CONFIG_ALLOW_CROSS=1
+          export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+          export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
+          export CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++
+          export AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar
+          export RUSTFLAGS="-C target-cpu=cortex-a53 -C target-feature=+neon"
+          cargo build --release --target aarch64-unknown-linux-gnu \
+              --bin cedar-detect-server
+          ls -lh target/aarch64-unknown-linux-gnu/release/cedar-detect-server
+
+      # -----------------------------------------------------------------------
+      # Generate gRPC Python stubs on the host from the proto file.
+      # Staged into the image — no protoc needed on Pi.
+      # -----------------------------------------------------------------------
+      - name: Generate Python gRPC stubs
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install grpcio grpcio-tools
+          python3 -m grpc_tools.protoc \
+            -I cedar-detect/src/proto \
+            --python_out=Solver \
+            --pyi_out=Solver \
+            --grpc_python_out=Solver \
+            cedar-detect/src/proto/cedar_detect.proto
+          ls -l Solver/cedar_detect_pb2*.py
+
+      # -----------------------------------------------------------------------
+      # Clone cedar-solve source so install.sh can build from source on Pi.
+      # Strip version pins from requirements before staging.
+      # -----------------------------------------------------------------------
+      - name: Clone cedar-solve and strip version pins
+        run: |
+          git clone --depth 1 https://github.com/smroid/cedar-solve.git
+
+          # Strip upper-bound version pins (<=x.y, <x.y) and exact pins (==x.y)
+          # from any requirements files so the Pi can install latest compatible
+          # versions. Lower bounds (>=) are left intact.
+          for f in cedar-solve/requirements*.txt cedar-solve/setup.cfg cedar-solve/pyproject.toml; do
+              if [ -f "$f" ]; then
+                  sed -i 's/[<>]=\?[0-9][0-9.]*//g' "$f"
+                  sed -i 's/==[0-9][0-9.]*//g' "$f"
+                  echo "  Stripped version pins from $f"
+                  cat "$f"
+              fi
+          done
 
       - name: Download official Raspberry Pi OS Lite
         run: |
@@ -37,9 +115,16 @@ jobs:
 
       - name: Mount and customize image
         run: |
+          # Verify all expected artifacts from prior steps are present
+          echo "=== Pre-mount artifact check ==="
+          ls -lh cedar-detect/target/aarch64-unknown-linux-gnu/release/cedar-detect-server
+          ls -l Solver/cedar_detect_pb2*.py
+          ls -la cedar-solve/
+          echo "=== Starting image customization ==="
+
           IMAGE=2025-11-24-raspios-bookworm-arm64-lite.img
 
-          truncate -s +256M $IMAGE
+          truncate -s +512M $IMAGE
 
           LOOP=$(sudo losetup -fP --show $IMAGE)
           echo "Loop device: $LOOP"
@@ -53,12 +138,10 @@ jobs:
           sudo mount ${LOOP}p1 /mnt/pi/boot/firmware
 
           # ------------------------------------------------------------------
-          # Create efinder user by writing directly to the user database files.
-          # No chroot execution — avoids Exec format error on x86_64 runner.
+          # Create efinder user by writing directly to user database files.
           # ------------------------------------------------------------------
           HASHED=$(mkpasswd -m sha-512 "12345678")
 
-          # Remove any existing UID 1000 user to avoid conflicts
           sudo sed -i '/^[^:]*:[^:]*:1000:[^:]*:/d' /mnt/pi/etc/passwd  || true
           sudo sed -i '/^[^:]*:[^:]*:1000:/d'        /mnt/pi/etc/shadow  || true
           sudo sed -i '/^[^:]*:[^:]*:1000:/d'        /mnt/pi/etc/group   || true
@@ -76,7 +159,6 @@ jobs:
           echo "efinder:!:::" | \
               sudo tee -a /mnt/pi/etc/gshadow > /dev/null
 
-          # Add efinder to supplementary groups
           for GRP in sudo video gpio i2c spi dialout; do
               if grep -q "^${GRP}:" /mnt/pi/etc/group; then
                   LINE=$(grep "^${GRP}:" /mnt/pi/etc/group)
@@ -92,11 +174,10 @@ jobs:
           echo "  efinder user created (UID=$EF_UID)"
 
           # ------------------------------------------------------------------
-          # Set hostname to efinder
+          # Set hostname
           # ------------------------------------------------------------------
           echo "efinder" | sudo tee /mnt/pi/etc/hostname > /dev/null
           sudo sed -i 's/raspberrypi/efinder/g' /mnt/pi/etc/hosts
-          echo "  hostname set to efinder"
 
           # ------------------------------------------------------------------
           # Enable SSH with password authentication
@@ -105,50 +186,59 @@ jobs:
           sudo sed -i \
               's/^#*PasswordAuthentication.*/PasswordAuthentication yes/' \
               /mnt/pi/etc/ssh/sshd_config
-          echo "  SSH enabled"
 
           # ------------------------------------------------------------------
-          # Boot firmware — camera overlay and USB serial gadget
-          # Baked in at build time so tether works on very first boot,
-          # before install.sh has run.
+          # Boot firmware — camera overlay and USB serial gadget (g_serial)
           # ------------------------------------------------------------------
           BOOT_CONFIG=/mnt/pi/boot/firmware/config.txt
-
-          # Disable VC4 KMS (conflicts with camera)
           sudo sed -i -e '/^\s*dtoverlay=vc4-kms-v3d/s/^/#/' \
                       -e '/^\s*max_framebuffers=/s/^/#/' \
                       "$BOOT_CONFIG"
-
-          echo ""                                           | sudo tee -a "$BOOT_CONFIG" > /dev/null
-          echo "# --- eFinder additions ---"               | sudo tee -a "$BOOT_CONFIG" > /dev/null
-          echo "# IMX477 camera"                           | sudo tee -a "$BOOT_CONFIG" > /dev/null
-          echo "camera_auto_detect=0"                      | sudo tee -a "$BOOT_CONFIG" > /dev/null
-          echo "dtoverlay=imx477"                          | sudo tee -a "$BOOT_CONFIG" > /dev/null
-          echo ""                                          | sudo tee -a "$BOOT_CONFIG" > /dev/null
+          echo ""                                                          | sudo tee -a "$BOOT_CONFIG" > /dev/null
+          echo "# --- eFinder additions ---"                               | sudo tee -a "$BOOT_CONFIG" > /dev/null
+          echo "# IMX477 camera"                                           | sudo tee -a "$BOOT_CONFIG" > /dev/null
+          echo "camera_auto_detect=0"                                      | sudo tee -a "$BOOT_CONFIG" > /dev/null
+          echo "dtoverlay=imx477"                                          | sudo tee -a "$BOOT_CONFIG" > /dev/null
+          echo ""                                                           | sudo tee -a "$BOOT_CONFIG" > /dev/null
           echo "# USB serial gadget (/dev/ttyUSB0 on host, /dev/ttyGS0 on Pi)" | sudo tee -a "$BOOT_CONFIG" > /dev/null
-          echo "dtoverlay=dwc2,dr_mode=peripheral"         | sudo tee -a "$BOOT_CONFIG" > /dev/null
-          echo "enable_uart=1"                             | sudo tee -a "$BOOT_CONFIG" > /dev/null
-          echo "  config.txt updated"
+          echo "dtoverlay=dwc2,dr_mode=peripheral"                         | sudo tee -a "$BOOT_CONFIG" > /dev/null
+          echo "enable_uart=1"                                              | sudo tee -a "$BOOT_CONFIG" > /dev/null
+
+          # ------------------------------------------------------------------
+          # WiFi country code — set to US at build time so the radio comes
+          # up on first boot without needing raspi-config + reboot.
+          # Written to both the regulatory database state file and
+          # wpa_supplicant.conf so NetworkManager picks it up immediately.
+          # ------------------------------------------------------------------
+          # Persist rfkill unblock state
+          sudo mkdir -p /mnt/pi/var/lib/systemd/rfkill
+          for f in /mnt/pi/var/lib/systemd/rfkill/*:wlan; do
+              [ -f "$f" ] && echo 0 | sudo tee "$f" > /dev/null
+          done
+          # Write country to wpa_supplicant.conf
+          sudo mkdir -p /mnt/pi/etc/wpa_supplicant
+          echo "country=US" | sudo tee /mnt/pi/etc/wpa_supplicant/wpa_supplicant.conf > /dev/null
+          echo "ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev" | sudo tee -a /mnt/pi/etc/wpa_supplicant/wpa_supplicant.conf > /dev/null
+          echo "update_config=1" | sudo tee -a /mnt/pi/etc/wpa_supplicant/wpa_supplicant.conf > /dev/null
+          # Write country to /etc/default/crda (regulatory domain)
+          echo "REGDOMAIN=US" | sudo tee /mnt/pi/etc/default/crda > /dev/null
+          # Write country to /etc/default/raspiwifi if present
+          echo "WIFI_COUNTRY=US" | sudo tee /mnt/pi/etc/default/raspiwifi > /dev/null 2>&1 || true
+          echo "  WiFi country code set to US"
 
           CMDLINE=/mnt/pi/boot/firmware/cmdline.txt
           sudo sed -i 's/rootwait/rootwait modules-load=dwc2,g_serial/' "$CMDLINE"
-          echo "  cmdline.txt updated"
 
-          # ------------------------------------------------------------------
-          # Enable serial getty on ttyGS0 so screen gets a login prompt.
-          # Written with echo lines — no heredoc.
-          # ------------------------------------------------------------------
+          # serial-getty on ttyGS0 so screen gets a login prompt
           sudo mkdir -p /mnt/pi/etc/systemd/system/serial-getty@ttyGS0.service.d
-          GETTY_OVERRIDE=/mnt/pi/etc/systemd/system/serial-getty@ttyGS0.service.d/override.conf
-          echo "[Service]"                                     | sudo tee    "$GETTY_OVERRIDE" > /dev/null
-          echo "ExecStart="                                    | sudo tee -a "$GETTY_OVERRIDE" > /dev/null
-          echo "ExecStart=-/sbin/agetty -L -i 115200 ttyGS0" | sudo tee -a "$GETTY_OVERRIDE" > /dev/null
-
+          GETTY=/mnt/pi/etc/systemd/system/serial-getty@ttyGS0.service.d/override.conf
+          echo "[Service]"                                     | sudo tee    "$GETTY" > /dev/null
+          echo "ExecStart="                                    | sudo tee -a "$GETTY" > /dev/null
+          echo "ExecStart=-/sbin/agetty -L -i 115200 ttyGS0" | sudo tee -a "$GETTY" > /dev/null
           sudo mkdir -p /mnt/pi/etc/systemd/system/multi-user.target.wants
           sudo ln -sf \
               /lib/systemd/system/serial-getty@.service \
               /mnt/pi/etc/systemd/system/multi-user.target.wants/serial-getty@ttyGS0.service
-          echo "  serial-getty@ttyGS0 enabled"
 
           # ------------------------------------------------------------------
           # Stage application files
@@ -166,6 +256,26 @@ jobs:
               /mnt/pi/home/efinder/Solver/test.npy
           sudo install -m 644 Solver/eFinder.config \
               /mnt/pi/home/efinder/Solver/eFinder.config
+
+          # gRPC stubs generated above
+          sudo install -m 644 Solver/cedar_detect_pb2.py \
+              /mnt/pi/home/efinder/Solver/cedar_detect_pb2.py
+          sudo install -m 644 Solver/cedar_detect_pb2_grpc.py \
+              /mnt/pi/home/efinder/Solver/cedar_detect_pb2_grpc.py
+          sudo install -m 644 Solver/cedar_detect_pb2.pyi \
+              /mnt/pi/home/efinder/Solver/cedar_detect_pb2.pyi 2>/dev/null || true
+
+          # cedar-detect pre-built aarch64 binary
+          sudo install -m 755 \
+              cedar-detect/target/aarch64-unknown-linux-gnu/release/cedar-detect-server \
+              /mnt/pi/usr/local/bin/cedar-detect-server
+
+          # cedar-solve source (version-pin-stripped) for on-Pi install
+          echo "  Staging cedar-solve source..."
+          ls -la cedar-solve/ || echo "WARNING: cedar-solve directory not found in workspace"
+          sudo cp -r cedar-solve /mnt/pi/home/efinder/cedar-solve-src
+          sudo chown -R ${EF_UID}:${EF_GID} /mnt/pi/home/efinder/cedar-solve-src
+          echo "  cedar-solve-src staged ($(du -sh /mnt/pi/home/efinder/cedar-solve-src | cut -f1))"
 
           sudo install -m 755 install.sh \
               /mnt/pi/home/efinder/install.sh

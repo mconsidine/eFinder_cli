@@ -63,15 +63,25 @@ echo " Device : $PI_MODEL"
 echo " Mode   : $( [ "$NON_INTERACTIVE" = true ] && echo non-interactive || echo interactive )"
 echo "============================================================================="
 
+# Validate sudo upfront and keep it alive for the duration of the install.
+# Without this, sudo may prompt for password again mid-install after the
+# default 15-minute timeout expires (database generation alone takes longer).
+sudo -v
+while true; do sudo -n true; sleep 50; kill -0 "$$" || exit; done 2>/dev/null &
+SUDO_KEEPALIVE_PID=$!
+trap 'kill $SUDO_KEEPALIVE_PID 2>/dev/null' EXIT
+
 # ---------------------------------------------------------------------------
-# Credentials
+# Credentials — defaults to 12345678, press Enter to accept
 # ---------------------------------------------------------------------------
 if [ "$NON_INTERACTIVE" = true ]; then
     : "${WIFI_PASS:?ERROR: WIFI_PASS must be exported before calling --non-interactive}"
     : "${SAMBA_PASS:?ERROR: SAMBA_PASS must be exported before calling --non-interactive}"
 else
-    read -rsp "WiFi AP Password : " WIFI_PASS;  echo
-    read -rsp "Samba Password   : " SAMBA_PASS; echo
+    read -rsp "WiFi AP Password [12345678]: " WIFI_PASS;  echo
+    WIFI_PASS="${WIFI_PASS:-12345678}"
+    read -rsp "Samba Password   [12345678]: " SAMBA_PASS; echo
+    SAMBA_PASS="${SAMBA_PASS:-12345678}"
 fi
 
 # ---------------------------------------------------------------------------
