@@ -205,8 +205,86 @@ jobs:
           echo "enable_uart=1"                                              | sudo tee -a "$BOOT_CONFIG" > /dev/null
 
           # ------------------------------------------------------------------
-          # WiFi country code — set to US at build time so the radio comes
-          # up on first boot without needing raspi-config + reboot.
+          # WiFi AP profile — baked into image with placeholder SSID.
+          # A firstboot service runs once on first boot, reads the real
+          # wlan0 MAC, updates the SSID, and deletes itself.
+          # ------------------------------------------------------------------
+          sudo mkdir -p /mnt/pi/etc/NetworkManager/system-connections
+          NM=/mnt/pi/etc/NetworkManager/system-connections/efinder-ap.nmconnection
+          echo "[connection]"                       | sudo tee    "$NM" > /dev/null
+          echo "id=efinder-ap"                      | sudo tee -a "$NM" > /dev/null
+          echo "type=wifi"                          | sudo tee -a "$NM" > /dev/null
+          echo "interface-name=wlan0"               | sudo tee -a "$NM" > /dev/null
+          echo "autoconnect=true"                   | sudo tee -a "$NM" > /dev/null
+          echo "autoconnect-priority=100"           | sudo tee -a "$NM" > /dev/null
+          echo "autoconnect-retries=-1"             | sudo tee -a "$NM" > /dev/null
+          echo ""                                   | sudo tee -a "$NM" > /dev/null
+          echo "[wifi]"                             | sudo tee -a "$NM" > /dev/null
+          echo "mode=ap"                            | sudo tee -a "$NM" > /dev/null
+          echo "ssid=efinder0000"                   | sudo tee -a "$NM" > /dev/null
+          echo "band=bg"                            | sudo tee -a "$NM" > /dev/null
+          echo "channel=6"                          | sudo tee -a "$NM" > /dev/null
+          echo ""                                   | sudo tee -a "$NM" > /dev/null
+          echo "[wifi-security]"                    | sudo tee -a "$NM" > /dev/null
+          echo "key-mgmt=wpa-psk"                   | sudo tee -a "$NM" > /dev/null
+          echo "psk=12345678"                       | sudo tee -a "$NM" > /dev/null
+          echo ""                                   | sudo tee -a "$NM" > /dev/null
+          echo "[ipv4]"                             | sudo tee -a "$NM" > /dev/null
+          echo "method=shared"                      | sudo tee -a "$NM" > /dev/null
+          echo "address1=192.168.50.1/24"           | sudo tee -a "$NM" > /dev/null
+          echo ""                                   | sudo tee -a "$NM" > /dev/null
+          echo "[ipv6]"                             | sudo tee -a "$NM" > /dev/null
+          echo "method=disabled"                    | sudo tee -a "$NM" > /dev/null
+          sudo chmod 600 "$NM"
+
+          # Remove preconfigured client profile so AP wins on first boot
+          sudo rm -f /mnt/pi/etc/NetworkManager/system-connections/preconfigured.nmconnection
+
+          # firstboot script — reads real MAC, updates SSID, deletes itself
+          sudo mkdir -p /mnt/pi/usr/local/bin
+          FBSCRIPT=/mnt/pi/usr/local/bin/efinder-firstboot.sh
+          echo '#!/bin/bash'                                                        | sudo tee    "$FBSCRIPT" > /dev/null
+          echo 'set -e'                                                             | sudo tee -a "$FBSCRIPT" > /dev/null
+          echo 'NM=/etc/NetworkManager/system-connections/efinder-ap.nmconnection' | sudo tee -a "$FBSCRIPT" > /dev/null
+          echo 'MAC=$(cat /sys/class/net/wlan0/address 2>/dev/null || echo "")'    | sudo tee -a "$FBSCRIPT" > /dev/null
+          echo 'if [ -n "$MAC" ]; then'                                            | sudo tee -a "$FBSCRIPT" > /dev/null
+          echo '    LAST4=$(echo "$MAC" | tr -d ":" | tail -c 5)'                  | sudo tee -a "$FBSCRIPT" > /dev/null
+          echo '    NEW_SSID="efinder${LAST4}"'                                    | sudo tee -a "$FBSCRIPT" > /dev/null
+          echo '    sed -i "s/^ssid=.*/ssid=${NEW_SSID}/" "$NM"'                   | sudo tee -a "$FBSCRIPT" > /dev/null
+          echo '    nmcli connection reload 2>/dev/null || true'                   | sudo tee -a "$FBSCRIPT" > /dev/null
+          echo '    nmcli connection up efinder-ap 2>/dev/null || true'            | sudo tee -a "$FBSCRIPT" > /dev/null
+          echo '    echo "efinder-firstboot: SSID set to ${NEW_SSID}"'             | sudo tee -a "$FBSCRIPT" > /dev/null
+          echo 'fi'                                                                 | sudo tee -a "$FBSCRIPT" > /dev/null
+          echo 'systemctl disable efinder-firstboot.service'                       | sudo tee -a "$FBSCRIPT" > /dev/null
+          echo 'rm -f /etc/systemd/system/efinder-firstboot.service'               | sudo tee -a "$FBSCRIPT" > /dev/null
+          echo 'rm -f /usr/local/bin/efinder-firstboot.sh'                         | sudo tee -a "$FBSCRIPT" > /dev/null
+          echo 'systemctl daemon-reload'                                            | sudo tee -a "$FBSCRIPT" > /dev/null
+          sudo chmod 755 "$FBSCRIPT"
+
+          # firstboot systemd service
+          FBSVC=/mnt/pi/etc/systemd/system/efinder-firstboot.service
+          echo "[Unit]"                                                             | sudo tee    "$FBSVC" > /dev/null
+          echo "Description=eFinder first-boot SSID configuration"                | sudo tee -a "$FBSVC" > /dev/null
+          echo "After=NetworkManager.service"                                      | sudo tee -a "$FBSVC" > /dev/null
+          echo "Wants=NetworkManager.service"                                      | sudo tee -a "$FBSVC" > /dev/null
+          echo "ConditionPathExists=/usr/local/bin/efinder-firstboot.sh"           | sudo tee -a "$FBSVC" > /dev/null
+          echo ""                                                                   | sudo tee -a "$FBSVC" > /dev/null
+          echo "[Service]"                                                          | sudo tee -a "$FBSVC" > /dev/null
+          echo "Type=oneshot"                                                       | sudo tee -a "$FBSVC" > /dev/null
+          echo "ExecStart=/bin/bash /usr/local/bin/efinder-firstboot.sh"           | sudo tee -a "$FBSVC" > /dev/null
+          echo "RemainAfterExit=yes"                                               | sudo tee -a "$FBSVC" > /dev/null
+          echo "StandardOutput=journal"                                             | sudo tee -a "$FBSVC" > /dev/null
+          echo "StandardError=journal"                                              | sudo tee -a "$FBSVC" > /dev/null
+          echo ""                                                                   | sudo tee -a "$FBSVC" > /dev/null
+          echo "[Install]"                                                          | sudo tee -a "$FBSVC" > /dev/null
+          echo "WantedBy=multi-user.target"                                        | sudo tee -a "$FBSVC" > /dev/null
+
+          # Enable firstboot service
+          sudo mkdir -p /mnt/pi/etc/systemd/system/multi-user.target.wants
+          sudo ln -sf \
+              /etc/systemd/system/efinder-firstboot.service \
+              /mnt/pi/etc/systemd/system/multi-user.target.wants/efinder-firstboot.service
+          echo "  AP profile and firstboot SSID service baked in"
           # Written to both the regulatory database state file and
           # wpa_supplicant.conf so NetworkManager picks it up immediately.
           # ------------------------------------------------------------------
@@ -281,6 +359,8 @@ jobs:
               /mnt/pi/home/efinder/install.sh
           sudo install -m 755 station.sh \
               /mnt/pi/home/efinder/station.sh
+          sudo install -m 755 sendcmd.sh \
+              /mnt/pi/home/efinder/sendcmd.sh
 
           # ------------------------------------------------------------------
           # Fix ownership
