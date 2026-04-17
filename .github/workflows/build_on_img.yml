@@ -95,14 +95,16 @@ jobs:
         run: |
           git clone --depth 1 https://github.com/smroid/cedar-solve.git
 
-          # Strip upper-bound version pins (<=x.y, <x.y) and exact pins (==x.y)
-          # from any requirements files so the Pi can install latest compatible
-          # versions. Lower bounds (>=) are left intact.
-          for f in cedar-solve/requirements*.txt cedar-solve/setup.cfg cedar-solve/pyproject.toml; do
+          # Strip only upper-bound version pins (<x.y, <=x.y, ==x.y) from
+          # cedar-solve's pyproject.toml so the Pi installs latest compatible
+          # versions. Lower bounds (>=x.y) are preserved.
+          # Also clean up any trailing commas left after stripping.
+          for f in cedar-solve/pyproject.toml cedar-solve/setup.cfg cedar-solve/requirements*.txt; do
               if [ -f "$f" ]; then
-                  sed -i 's/[<>]=\?[0-9][0-9.]*//g' "$f"
+                  sed -i 's/,\s*<[^,"]*//g' "$f"
+                  sed -i 's/,\s*<=[^,"]*//g' "$f"
                   sed -i 's/==[0-9][0-9.]*//g' "$f"
-                  echo "  Stripped version pins from $f"
+                  echo "  Stripped upper-bound version pins from $f"
                   cat "$f"
               fi
           done
