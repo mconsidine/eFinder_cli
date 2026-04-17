@@ -141,7 +141,6 @@ sudo -u "$EFINDER_USER" python3 -m venv "$VENV" --system-site-packages
 # Install Pillow >= 9.0 explicitly first so pip's resolver uses our version
 "$VENV/bin/pip" install --prefer-binary "Pillow>=9.0"
 "$VENV/bin/pip" install --prefer-binary \
-    grpcio \
     pyserial \
     adafruit-circuitpython-adxl34x
 
@@ -149,8 +148,8 @@ sudo -u "$EFINDER_USER" python3 -m venv "$VENV" --system-site-packages
 # This avoids PyPI version pins entirely and builds from the cloned repo.
 CEDAR_SOLVE_SRC="$EFINDER_HOME/cedar-solve-src"
 if [ -d "$CEDAR_SOLVE_SRC" ]; then
-    echo "  Installing cedar-solve from source..."
-    "$VENV/bin/pip" install "$CEDAR_SOLVE_SRC"
+    echo "  Installing cedar-solve from source (with cedar-detect extra)..."
+    "$VENV/bin/pip" install "$CEDAR_SOLVE_SRC[cedar-detect]"
     echo "  cedar-solve installed from source."
 else
     echo "  cedar-solve source not found at $CEDAR_SOLVE_SRC"
