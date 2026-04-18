@@ -309,9 +309,10 @@ sudo -u "$EFINDER_USER" cp "${DB_CACHE}.npz" "${DB_FIXED}.npz"
 
 # Also copy to tetra3 package data dir — cedar-solve's tetra3 resolves
 # database paths relative to its own package, not ~/Solver.
-TETRA3_DATA=$("$VENV/bin/python3" -c \
+TETRA3_DATA=$(sudo -u "$EFINDER_USER" "$VENV/bin/python3" -c \
     "import tetra3, os; print(os.path.join(os.path.dirname(tetra3.__file__), 'data'))")
-cp "${DB_FIXED}.npz" "$TETRA3_DATA/efinder-tetra-database.npz"
+echo "  Tetra3 data directory: $TETRA3_DATA"
+sudo install -o root -g root -m 644 "${DB_FIXED}.npz" "$TETRA3_DATA/efinder-tetra-database.npz"
 echo "  Database ready."
 
 # ---------------------------------------------------------------------------
