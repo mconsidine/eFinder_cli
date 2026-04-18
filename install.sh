@@ -99,22 +99,16 @@ sudo apt-get install -y \
     git \
     python3-pip \
     python3-numpy \
-    python3-pil \
+    python3-pillow \
     python3-smbus \
-    python3-picamera2 \
+    python3-picamera2 --no-install-recommends \
     python3-scipy \
     libopenblas-dev \
     samba \
     samba-common-bin \
     apache2 \
-    php8.2 \
-    libapache2-mod-php8.2 \
-    libjpeg-dev \
-    zlib1g-dev \
-    libtiff-dev \
-    libfreetype-dev \
-    liblcms2-dev \
-    libwebp-dev
+    php \
+    libapache2-mod-php
 
 # ---------------------------------------------------------------------------
 # 2. Python virtual environment
@@ -126,21 +120,16 @@ sudo -u "$EFINDER_USER" python3 -m venv "$VENV" --system-site-packages
 "$VENV/bin/pip" install --prefer-binary "Pillow>=9.0"
 "$VENV/bin/pip" install --prefer-binary \
     pyserial \
-    adafruit-circuitpython-adxl34x
+    adafruit-circuitpython-adxl34x \
+    gaia-catalog
 
-# Install tetra3rs — pre-built ARM64 wheel from PyPI, no compilation needed.
-# If the source was staged in the image (future optimisation), install from
-# source instead to get NEON-optimised build for Cortex-A53.
+# Install tetra3rs — pre-built ARM64 wheel staged by CI, or fall back to PyPI.
 TETRA3RS_SRC="$EFINDER_HOME/tetra3rs-src"
-if [ -d "$TETRA3RS_SRC" ]; then
-    echo "  Installing tetra3rs from source (Cortex-A53 optimised)..."
-    # Rust must be present for source build; installed by CI into image
-    if [ -f "/usr/local/bin/rust-install-done" ]; then
-        source "$HOME/.cargo/env" 2>/dev/null || true
-    fi
-    RUSTFLAGS="-C target-cpu=cortex-a53 -C target-feature=+neon" \
-        "$VENV/bin/pip" install "$TETRA3RS_SRC"
-    echo "  tetra3rs installed from source."
+TETRA3RS_WHEEL=$(ls "$TETRA3RS_SRC"/*.whl 2>/dev/null | head -1)
+if [ -n "$TETRA3RS_WHEEL" ]; then
+    echo "  Installing tetra3rs from staged wheel: $TETRA3RS_WHEEL"
+    "$VENV/bin/pip" install "$TETRA3RS_WHEEL"
+    echo "  tetra3rs installed from staged wheel."
 else
     echo "  Installing tetra3rs from PyPI (pre-built ARM64 wheel)..."
     "$VENV/bin/pip" install --prefer-binary tetra3rs
@@ -408,15 +397,14 @@ echo "StartLimitBurst=4"                                             | sudo tee 
 echo "StandardOutput=journal"                                        | sudo tee -a "$EF_SVC" > /dev/null
 echo "StandardError=journal"                                         | sudo tee -a "$EF_SVC" > /dev/null
 echo ""                                                              | sudo tee -a "$EF_SVC" > /dev/null
-echo ""                                                              | sudo tee -a "$EF_SVC" > /dev/null
 echo "[Install]"                                                     | sudo tee -a "$EF_SVC" > /dev/null
 echo "WantedBy=multi-user.target"                                   | sudo tee -a "$EF_SVC" > /dev/null
- 
+
 sudo systemctl daemon-reload
 sudo systemctl enable cpu-performance.service
 sudo systemctl enable efinder.service
 echo "  Services installed and enabled."
- 
+
 # ---------------------------------------------------------------------------
 # Slim
 # ---------------------------------------------------------------------------
@@ -430,6 +418,10 @@ echo "  Done."
 # ---------------------------------------------------------------------------
 # Done
 # ---------------------------------------------------------------------------
+MAC=$(cat /sys/class/net/wlan0/address 2>/dev/null || echo "00:00:00:00:00:00")
+LAST4=$(echo "$MAC" | tr -d ":" | tail -c 5)
+SSID="efinder${LAST4}"
+
 echo ""
 echo "============================================================================="
 echo " Installation complete."
@@ -441,11 +433,10 @@ echo "   Samba    : efindershare  user=efinder  pass=$SAMBA_PASS"
 echo "   Logs     : journalctl -u efinder -f"
 echo "   Helpers  : ~/ap.sh   ~/station.sh   ~/sendcmd.sh"
 echo "============================================================================="
- 
+
 date > "$INSTALL_MARKER"
- 
+
 if [ "$NON_INTERACTIVE" = false ]; then
     read -rp "Reboot now? [y/N] " ans
     [[ "$ans" =~ ^[Yy]$ ]] && sudo reboot now
 fi
- 
