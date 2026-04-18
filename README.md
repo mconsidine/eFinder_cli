@@ -1,4 +1,6 @@
-# eFinder — tinySS
+# eFinder — tetra3rs
+
+this needs to be rewritten 
 
 Plate-solving electronic finder scope for the Raspberry Pi Zero 2W.  
 Connects to **SkySafari** over WiFi using the LX200 protocol on TCP port 4060.  
