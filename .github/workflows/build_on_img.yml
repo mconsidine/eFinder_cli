@@ -95,16 +95,18 @@ jobs:
         run: |
           git clone --depth 1 https://github.com/smroid/cedar-solve.git
 
-          # Strip only upper-bound version pins (<x.y, <=x.y, ==x.y) from
-          # cedar-solve's pyproject.toml so the Pi installs latest compatible
-          # versions. Lower bounds (>=x.y) are preserved.
-          # Also clean up any trailing commas left after stripping.
-          for f in cedar-solve/pyproject.toml cedar-solve/setup.cfg cedar-solve/requirements*.txt; do
+          # Strip upper-bound pins only from plain-text requirements files.
+          # Do NOT run sed on pyproject.toml — TOML single-quoted strings can
+          # span lines in arrays, and sed will corrupt them by consuming the
+          # newline inside the string, producing a TOMLDecodeError at install time.
+          # The Pillow < 9 pin (which was the original motivation) is already
+          # neutralised by pre-installing Pillow>=9.0 in install.sh before
+          # running pip install cedar-solve-src.
+          for f in cedar-solve/requirements*.txt cedar-solve/setup.cfg; do
               if [ -f "$f" ]; then
-                  sed -i 's/,\s*<[^,"]*//g' "$f"
-                  sed -i 's/,\s*<=[^,"]*//g' "$f"
+                  sed -i 's/,\s*<[^,"\n'"'"']*//g' "$f"
                   sed -i 's/==[0-9][0-9.]*//g' "$f"
-                  echo "  Stripped upper-bound version pins from $f"
+                  echo "  Stripped version pins from $f"
                   cat "$f"
               fi
           done
