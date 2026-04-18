@@ -37,24 +37,19 @@ jobs:
           source "$HOME/.cargo/env"
           rustup target add aarch64-unknown-linux-gnu
 
-      - name: Install cross-compilation tools
-        run: |
-          sudo apt-get install -y \
-            gcc-aarch64-linux-gnu \
-            python3-pip \
-            python3-dev
-          # maturin from PyPI (apt version is often too old)
-          pip3 install "maturin>=1.4"
+      - name: Set up Python 3.13 (matches Trixie)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
 
-      - name: Install cross-python for aarch64
+      - name: Install maturin and ziglang
         run: |
-          # maturin cross-compile needs a Python sysconfig for the target arch.
-          # The easiest way is the cross-python shim that maturin itself recommends.
-          pip3 install cross-python
-          # Find the host python3 version to pin the target ABI
-          PY_VER=$(python3 -c "import sys; print('%d.%d' % sys.version_info[:2])")
-          echo "PY_VER=$PY_VER" >> $GITHUB_ENV
-          echo "Host Python: $PY_VER"
+          sudo apt-get install -y python3-dev
+          # maturin from PyPI (apt version is often too old)
+          # ziglang provides the zig cross-linker -- no gcc cross toolchain needed
+          # Use the same python3.13 that setup-python provided so the wheel ABI
+          # matches Trixie's python3 on the Pi.
+          pip install "maturin>=1.4" ziglang
 
       - name: Clone tetra3rs
         run: |
@@ -74,17 +69,15 @@ jobs:
         run: |
           source "$HOME/.cargo/env"
           cd tetra3rs/python
-          export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
-          export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
-          export CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++
-          export AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar
           export RUSTFLAGS="-C target-cpu=cortex-a53 -C target-feature=+neon"
-          # -i: tell maturin which Python ABI to target (cross-python provides the sysconfig)
-          # --compatibility linux: skip manylinux container, we're building for a specific Pi image
+          # --zig: use zig as cross-linker (from ziglang PyPI package, no gcc toolchain needed)
+          # -i python3.13: must match Trixie's python3 so wheel ABI is compatible
+          # --compatibility linux: target the Pi image directly, skip manylinux auditing
           maturin build --release \
               --target aarch64-unknown-linux-gnu \
               --compatibility linux \
-              -i "python${PY_VER}" \
+              --zig \
+              -i python3.13 \
               --out /tmp/tetra3rs-wheels/
           ls -lh /tmp/tetra3rs-wheels/
 
@@ -188,15 +181,6 @@ jobs:
           sudo ln -sf \
               /lib/systemd/system/serial-getty@.service \
               /mnt/pi/etc/systemd/system/multi-user.target.wants/serial-getty@ttyGS0.service
-
-          # ------------------------------------------------------------------
-          # WiFi country code
-          # ------------------------------------------------------------------
-          sudo mkdir -p /mnt/pi/etc/wpa_supplicant
-          echo "country=US"                                              | sudo tee    /mnt/pi/etc/wpa_supplicant/wpa_supplicant.conf > /dev/null
-          echo "ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev" | sudo tee -a /mnt/pi/etc/wpa_supplicant/wpa_supplicant.conf > /dev/null
-          echo "update_config=1"                                         | sudo tee -a /mnt/pi/etc/wpa_supplicant/wpa_supplicant.conf > /dev/null
-          echo "REGDOMAIN=US" | sudo tee /mnt/pi/etc/default/crda > /dev/null
 
           # ------------------------------------------------------------------
           # WiFi AP profile with placeholder SSID + firstboot SSID fixup
