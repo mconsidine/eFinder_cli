@@ -311,7 +311,7 @@ sudo -u "$EFINDER_USER" cp "${DB_CACHE}.npz" "${DB_FIXED}.npz"
 # database paths relative to its own package, not ~/Solver.
 TETRA3_DATA=$("$VENV/bin/python3" -c \
     "import tetra3, os; print(os.path.join(os.path.dirname(tetra3.__file__), 'data'))")
-sudo -u "$EFINDER_USER" cp "${DB_FIXED}.npz" "$TETRA3_DATA/efinder-tetra-database.npz"
+cp "${DB_FIXED}.npz" "$TETRA3_DATA/efinder-tetra-database.npz"
 echo "  Database ready."
 
 # ---------------------------------------------------------------------------
