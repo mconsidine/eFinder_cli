@@ -42,11 +42,19 @@ jobs:
           sudo apt-get install -y \
             gcc-aarch64-linux-gnu \
             python3-pip \
-            python3-dev \
-            maturin \
-            || true
-          # maturin builds Python extension modules from Rust (pyo3)
-          pip3 install maturin
+            python3-dev
+          # maturin from PyPI (apt version is often too old)
+          pip3 install "maturin>=1.4"
+
+      - name: Install cross-python for aarch64
+        run: |
+          # maturin cross-compile needs a Python sysconfig for the target arch.
+          # The easiest way is the cross-python shim that maturin itself recommends.
+          pip3 install cross-python
+          # Find the host python3 version to pin the target ABI
+          PY_VER=$(python3 -c "import sys; print('%d.%d' % sys.version_info[:2])")
+          echo "PY_VER=$PY_VER" >> $GITHUB_ENV
+          echo "Host Python: $PY_VER"
 
       - name: Clone tetra3rs
         run: |
@@ -59,7 +67,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             tetra3rs/target
-          key: tetra3rs-aarch64-${{ hashFiles('tetra3rs/Cargo.toml') }}
+          key: tetra3rs-aarch64-${{ hashFiles('tetra3rs/python/Cargo.toml') }}
           restore-keys: tetra3rs-aarch64-
 
       - name: Cross-compile tetra3rs wheel for aarch64
@@ -71,17 +79,20 @@ jobs:
           export CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++
           export AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar
           export RUSTFLAGS="-C target-cpu=cortex-a53 -C target-feature=+neon"
-          # Build a manylinux-compatible wheel for aarch64
+          # -i: tell maturin which Python ABI to target (cross-python provides the sysconfig)
+          # --compatibility linux: skip manylinux container, we're building for a specific Pi image
           maturin build --release \
               --target aarch64-unknown-linux-gnu \
+              --compatibility linux \
+              -i "python${PY_VER}" \
               --out /tmp/tetra3rs-wheels/
           ls -lh /tmp/tetra3rs-wheels/
 
-      - name: Download official Raspberry Pi OS Lite
+      - name: Download official Raspberry Pi OS Lite (Trixie)
         run: |
           wget -q \
-            https://downloads.raspberrypi.org/raspios_oldstable_lite_arm64/images/raspios_oldstable_lite_arm64-2025-11-24/2025-11-24-raspios-bookworm-arm64-lite.img.xz
-          xz -d 2025-11-24-raspios-bookworm-arm64-lite.img.xz
+            https://downloads.raspberrypi.org/raspios_lite_arm64/images/raspios_lite_arm64-2025-10-02/2025-10-01-raspios-trixie-arm64-lite.img.xz
+          xz -d 2025-10-01-raspios-trixie-arm64-lite.img.xz
 
       - name: Mount and customize image
         run: |
@@ -90,7 +101,7 @@ jobs:
           ls -lh /tmp/tetra3rs-wheels/
           echo "=== Starting image customization ==="
 
-          IMAGE=2025-11-24-raspios-bookworm-arm64-lite.img
+          IMAGE=2025-10-01-raspios-trixie-arm64-lite.img
 
           truncate -s +512M $IMAGE
 
@@ -296,7 +307,7 @@ jobs:
 
       - name: Compress final image
         run: |
-          xz -T0 -z 2025-11-24-raspios-bookworm-arm64-lite.img
+          xz -T0 -z 2025-10-01-raspios-trixie-arm64-lite.img
           echo "Compression complete"
 
       - name: Generate artifact name
@@ -307,7 +318,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ARTIFACT_NAME }}
-          path: 2025-11-24-raspios-bookworm-arm64-lite.img.xz
+          path: 2025-10-01-raspios-trixie-arm64-lite.img.xz
           compression-level: 0
           if-no-files-found: error
           retention-days: 14
