@@ -397,4 +397,55 @@ echo ""                                                              | sudo tee 
 echo "[Service]"                                                     | sudo tee -a "$EF_SVC" > /dev/null
 echo "Type=simple"                                                   | sudo tee -a "$EF_SVC" > /dev/null
 echo "User=efinder"                                                  | sudo tee -a "$EF_SVC" > /dev/null
-echo "WorkingDirectory=/home/efinde
+echo "WorkingDirectory=/home/efinder/Solver"                        | sudo tee -a "$EF_SVC" > /dev/null
+echo "Environment=PATH=/home/efinder/venv-efinder/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" | sudo tee -a "$EF_SVC" > /dev/null
+echo "ExecStartPre=/bin/sleep 2"                                    | sudo tee -a "$EF_SVC" > /dev/null
+echo "ExecStart=/home/efinder/venv-efinder/bin/python /home/efinder/Solver/eFinder-tetra3rs.py" | sudo tee -a "$EF_SVC" > /dev/null
+echo "Restart=on-failure"                                            | sudo tee -a "$EF_SVC" > /dev/null
+echo "RestartSec=15"                                                 | sudo tee -a "$EF_SVC" > /dev/null
+echo "StartLimitIntervalSec=120"                                    | sudo tee -a "$EF_SVC" > /dev/null
+echo "StartLimitBurst=4"                                             | sudo tee -a "$EF_SVC" > /dev/null
+echo "StandardOutput=journal"                                        | sudo tee -a "$EF_SVC" > /dev/null
+echo "StandardError=journal"                                         | sudo tee -a "$EF_SVC" > /dev/null
+echo ""                                                              | sudo tee -a "$EF_SVC" > /dev/null
+echo ""                                                              | sudo tee -a "$EF_SVC" > /dev/null
+echo "[Install]"                                                     | sudo tee -a "$EF_SVC" > /dev/null
+echo "WantedBy=multi-user.target"                                   | sudo tee -a "$EF_SVC" > /dev/null
+ 
+sudo systemctl daemon-reload
+sudo systemctl enable cpu-performance.service
+sudo systemctl enable efinder.service
+echo "  Services installed and enabled."
+ 
+# ---------------------------------------------------------------------------
+# Slim
+# ---------------------------------------------------------------------------
+echo ""
+echo "[slim] Cleaning up..."
+sudo apt-get autoremove -y
+sudo apt-get clean
+sudo rm -rf /usr/share/doc/* /usr/share/man/*
+echo "  Done."
+
+# ---------------------------------------------------------------------------
+# Done
+# ---------------------------------------------------------------------------
+echo ""
+echo "============================================================================="
+echo " Installation complete."
+echo ""
+echo "   WiFi AP  : SSID='$SSID'  Password='$WIFI_PASS'  IP=192.168.50.1"
+echo "   SSH      : ssh efinder@192.168.50.1"
+echo "   SkySafari: connect to $SSID -> TCP port 4060 (LX200)"
+echo "   Samba    : efindershare  user=efinder  pass=$SAMBA_PASS"
+echo "   Logs     : journalctl -u efinder -f"
+echo "   Helpers  : ~/ap.sh   ~/station.sh   ~/sendcmd.sh"
+echo "============================================================================="
+ 
+date > "$INSTALL_MARKER"
+ 
+if [ "$NON_INTERACTIVE" = false ]; then
+    read -rp "Reboot now? [y/N] " ans
+    [[ "$ans" =~ ^[Yy]$ ]] && sudo reboot now
+fi
+ 
