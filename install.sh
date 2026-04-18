@@ -269,10 +269,13 @@ echo "[6c] Checking Hipparcos star catalogue..."
 HIP_DIR="$EFINDER_HOME/Solver"
 if [ ! -f "$HIP_DIR/hip_main.dat" ]; then
     echo "  Downloading Hipparcos catalogue..."
+    #sudo -u "$EFINDER_USER" wget -q --show-progress \
+    #    https://cdsarc.cds.unistra.fr/ftp/cats/I/239/hip_main.dat.gz \
+    #    -O "$HIP_DIR/hip_main.dat.gz"
+    #sudo -u "$EFINDER_USER" gunzip "$HIP_DIR/hip_main.dat.gz"
     sudo -u "$EFINDER_USER" wget -q --show-progress \
-        https://cdsarc.cds.unistra.fr/ftp/cats/I/239/hip_main.dat.gz \
-        -O "$HIP_DIR/hip_main.dat.gz"
-    sudo -u "$EFINDER_USER" gunzip "$HIP_DIR/hip_main.dat.gz"
+        https://cdsarc.cds.unistra.fr/ftp/cats/I/239/hip_main.dat \
+        -O "$HIP_DIR/hip_main.dat"
     echo "  Hipparcos catalogue downloaded."
 else
     echo "  Hipparcos catalogue already present -- no download needed."
