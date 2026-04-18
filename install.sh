@@ -304,7 +304,7 @@ if [ ! -f "${DB_CACHE}.npz" ]; then
     echo "    max_fov=${DB_MAX_FOV},"                             >> "$GEN_SCRIPT"
     echo "    save_as=db,"                                        >> "$GEN_SCRIPT"
     echo "    star_catalog='hip_main',"                           >> "$GEN_SCRIPT"
-    echo "    max_magnitude=${DB_MAG}.0,"                         >> "$GEN_SCRIPT"
+    echo "    star_max_magnitude=${DB_MAG}.0,"                    >> "$GEN_SCRIPT"
     echo ")"                                                      >> "$GEN_SCRIPT"
     echo "print('Database saved to', db + '.npz')"               >> "$GEN_SCRIPT"
     sudo -u "$EFINDER_USER" "$VENV/bin/python3" "$GEN_SCRIPT"
