@@ -95,13 +95,13 @@ sudo apt-get upgrade -y
 
 echo ""
 echo "[2/8] Installing required packages..."
-sudo apt-get install -y \
+sudo apt-get install -y --no-install-recommends \
     git \
     python3-pip \
     python3-numpy \
     python3-pillow \
     python3-smbus \
-    python3-picamera2 --no-install-recommends \
+    python3-picamera2 \
     python3-scipy \
     libopenblas-dev \
     samba \
@@ -120,8 +120,7 @@ sudo -u "$EFINDER_USER" python3 -m venv "$VENV" --system-site-packages
 "$VENV/bin/pip" install --prefer-binary "Pillow>=9.0"
 "$VENV/bin/pip" install --prefer-binary \
     pyserial \
-    adafruit-circuitpython-adxl34x \
-    gaia-catalog
+    adafruit-circuitpython-adxl34x
 
 # Install tetra3rs — pre-built ARM64 wheel staged by CI, or fall back to PyPI.
 TETRA3RS_SRC="$EFINDER_HOME/tetra3rs-src"
