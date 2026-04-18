@@ -277,6 +277,10 @@ if [ ! -f "$HIP_DIR/hip_main.dat" ]; then
         https://cdsarc.cds.unistra.fr/ftp/cats/I/239/hip_main.dat \
         -O "$HIP_DIR/hip_main.dat"
     echo "  Hipparcos catalogue downloaded."
+    # cedar-solve's tetra3 looks for hip_main.dat in its own package directory
+    TETRA3_PKG=$("$VENV/bin/python3" -c \
+        "import tetra3, os; print(os.path.dirname(tetra3.__file__))")
+    cp "$HIP_DIR/hip_main.dat" "$TETRA3_PKG/hip_main.dat"
 else
     echo "  Hipparcos catalogue already present -- no download needed."
 fi
@@ -295,8 +299,6 @@ if [ ! -f "${DB_CACHE}.npz" ]; then
     echo "  This will take several minutes on Pi Zero 2W..."
     GEN_SCRIPT="/tmp/gen_database.py"
     echo "import os, sys"                                         > "$GEN_SCRIPT"
-    echo "os.chdir('/home/efinder/Solver')"                      >> "$GEN_SCRIPT"
-    echo "sys.path.insert(0, '/home/efinder/Solver')"            >> "$GEN_SCRIPT"
     echo "import tetra3"                                          >> "$GEN_SCRIPT"
     echo "db = '/home/efinder/Solver/t3_fov${DB_MAX_FOV}_mag${DB_MAG}'" >> "$GEN_SCRIPT"
     echo "t3 = tetra3.Tetra3(load_database=None)"                >> "$GEN_SCRIPT"
