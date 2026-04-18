@@ -867,27 +867,30 @@ def main():
     lx200_cmd_q    = Queue()
     lx200_result_q = Queue()
 
-    procs = {
-        'camera': Process(
+    # Store target/args alongside each Process so the restart logic can
+    # reconstruct them without relying on private _target/_args attributes.
+    proc_specs = {
+        'camera': dict(
             target=camera_process,
-            args=(shm.name, frame_ready, cam_cmd_q, cam_result_q, test_mode),
-            name='eFinder-camera', daemon=True),
-        'solver': Process(
+            args=(shm.name, frame_ready, cam_cmd_q, cam_result_q, test_mode)),
+        'solver': dict(
             target=solver_process,
             args=(shm.name, frame_ready, cam_cmd_q, cam_result_q,
                   lx200_cmd_q, lx200_result_q,
-                  shared_ra, shared_dec, offset_flag, test_mode),
-            name='eFinder-solver', daemon=True),
-        'lx200': Process(
+                  shared_ra, shared_dec, offset_flag, test_mode)),
+        'lx200': dict(
             target=lx200_process,
             args=(lx200_cmd_q, lx200_result_q,
                   shared_ra, shared_dec, offset_flag, test_mode,
-                  accel_enabled),
-            name='eFinder-lx200', daemon=True),
+                  accel_enabled)),
     }
 
-    for name, p in procs.items():
+    procs = {}
+    for name, spec in proc_specs.items():
+        p = Process(target=spec['target'], args=spec['args'],
+                    name='eFinder-' + name, daemon=True)
         p.start()
+        procs[name] = p
         print('Started %s (pid %d)' % (name, p.pid))
 
     time.sleep(2.0)
@@ -899,8 +902,9 @@ def main():
             for name, p in list(procs.items()):
                 if not p.is_alive():
                     print('[main] %s died (exit %s) - restarting' % (name, p.exitcode))
-                    new_p = Process(target=p._target, args=p._args,
-                                    name=p.name, daemon=True)
+                    spec = proc_specs[name]
+                    new_p = Process(target=spec['target'], args=spec['args'],
+                                    name='eFinder-' + name, daemon=True)
                     new_p.start()
                     procs[name] = new_p
                     print('[main] %s restarted (pid %d)' % (name, new_p.pid))
