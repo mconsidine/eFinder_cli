@@ -271,7 +271,7 @@ jobs:
           sudo cp /tmp/tetra3rs-wheels/*.whl /mnt/pi/home/efinder/tetra3rs-src/
           echo "  tetra3rs wheel staged: $(ls /tmp/tetra3rs-wheels/*.whl)"
 
-          sudo install -m 755 install-tetra3rs.sh \
+          sudo install -m 755 install_tetra3rs.sh \
               /mnt/pi/home/efinder/install.sh
           sudo install -m 755 station.sh \
               /mnt/pi/home/efinder/station.sh
