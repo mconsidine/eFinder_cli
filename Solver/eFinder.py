@@ -31,7 +31,7 @@ version   = "6.6"
 
 # Set to True if an ADXL343 accelerometer is wired to the I2C bus.
 # When False no accelerometer import is attempted and :GA always returns '-2'.
-USE_ACCELEROMETER = False
+USE_ACCELEROMETER = True
 
 # =============================================================================
 
