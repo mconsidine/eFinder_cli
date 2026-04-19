@@ -24,7 +24,6 @@
 #   shared_dec     — Value(c_double) solver writes, lx200 reads — zero-copy
 #   offset_flag    — Value(c_bool)   lx200/solver coordinate during offset meas.
 #   test_mode      — Value(c_bool)   lx200 sets, camera reads
-#   accel_enabled  — Value(c_bool)   from config, lx200 reads at startup
 #   cmd_q          — Queue  lx200 -> solver: tuning/on-demand commands
 #   result_q       — Queue  solver -> lx200: command results
 #   cam_cmd_q      — Queue  solver -> camera: set_exp, capture_once
@@ -55,7 +54,7 @@ import numpy as np
 # Shared constants
 # ---------------------------------------------------------------------------
 home_path   = str(Path.home())
-version     = "6.6-tetra3rs-mp-tb"
+version     = "6.6-tetra3rs-mp-tb3"
 config_path = os.path.join(home_path, "Solver/eFinder.config")
 solver_path = os.path.join(home_path, "Solver")
 
@@ -957,8 +956,7 @@ def solver_process(shm_names, frame_ready, cam_cmd_q, cam_result_q,
 # PROCESS 3 - LX200 / WiFi server
 # ===========================================================================
 def lx200_process(lx200_cmd_q, lx200_result_q,
-                  shared_ra, shared_dec, offset_flag, test_mode,
-                  accel_enabled):
+                  shared_ra, shared_dec, offset_flag, test_mode):
     """
     Serves SkySafari on port 4060.
     Reads ra/dec directly from shared Values - no IPC latency on hot path.
@@ -967,35 +965,6 @@ def lx200_process(lx200_cmd_q, lx200_result_q,
     """
     _pin_cpu('lx200')
     coordinates = Coordinates()
-    altAngle = False; angle = None
-
-    def enable_accel():
-        nonlocal altAngle, angle
-        try:
-            import board, adafruit_adxl34x
-            angle = adafruit_adxl34x.ADXL343(board.I2C())
-            altAngle = True
-            print('[lx200] accelerometer enabled'); return True
-        except Exception as e:
-            print('[lx200] accelerometer init failed:', e); return False
-
-    def disable_accel():
-        nonlocal altAngle, angle
-        altAngle = False; angle = None
-
-    # Auto-enable accelerometer at startup if config flag is set.
-    # Packages are always installed — graceful fallback if hardware absent.
-    if accel_enabled.value:
-        enable_accel()
-
-    def get_alt():
-        if not altAngle: return '-2'
-        try:
-            x, y, z = angle.acceleration
-            if z > 0: return '-1'
-            if x > 0: return '99'
-            return '%2d' % (-180 / math.pi * math.asin(z / 10))
-        except Exception: return '-2'
 
     def _read_state(key, default=''):
         """Read a single key from the JSON state file — non-critical path only."""
@@ -1119,8 +1088,6 @@ def lx200_process(lx200_cmd_q, lx200_result_q,
                     elif cmd == 'GX':
                         res = _cmd('auto_exp', timeout=60.0)
                         client.send((':GX' + res + '#').encode('ascii'))
-                    elif cmd == 'GA':
-                        client.send((':GA' + get_alt() + '#').encode('ascii'))
                     elif cmd == 'IM':
                         res = _cmd('start_images', x.strip('#')[3:4])
                         client.send((':IM' + res + '#').encode('ascii'))
@@ -1130,12 +1097,6 @@ def lx200_process(lx200_cmd_q, lx200_result_q,
                     elif cmd == 'TO':
                         test_mode.value = False
                         client.send(b':TO1#')
-                    elif cmd == 'AC':
-                        client.send((':AC' + ('1' if enable_accel() else '0') + '#').encode('ascii'))
-                    elif cmd == 'AD':
-                        disable_accel(); client.send(b':AD1#')
-                    elif cmd == 'AG':
-                        client.send((':AG' + ('1' if altAngle else '0') + '#').encode('ascii'))
 
             print('[lx200] SkySafari disconnected')
         except Exception as e:
@@ -1179,11 +1140,6 @@ def main():
     offset_flag = Value(ctypes.c_bool, False)
     test_mode   = Value(ctypes.c_bool, False)
 
-    # Read accelerometer flag from config so lx200 process knows at startup.
-    _param = load_param()
-    accel_enabled = Value(ctypes.c_bool,
-        str(_param.get('accelerometer', 'false')).strip().lower() == 'true')
-
     # queues and events
     frame_ready    = Event()
     cam_cmd_q      = Queue()
@@ -1207,8 +1163,7 @@ def main():
         'lx200': dict(
             target=lx200_process,
             args=(lx200_cmd_q, lx200_result_q,
-                  shared_ra, shared_dec, offset_flag, test_mode,
-                  accel_enabled)),
+                  shared_ra, shared_dec, offset_flag, test_mode)),
     }
 
     procs = {}

@@ -101,7 +101,6 @@ sudo apt-get install -y --no-install-recommends \
     python3-pip \
     python3-numpy \
     python3-pillow \
-    python3-smbus \
     python3-picamera2 \
     python3-scipy \
     libopenblas-dev \
@@ -119,21 +118,50 @@ echo "[3/9] Setting up Python virtual environment..."
 sudo -u "$EFINDER_USER" python3 -m venv "$VENV" --system-site-packages
 "$VENV/bin/pip" install --upgrade pip
 "$VENV/bin/pip" install --prefer-binary "Pillow>=9.0"
-"$VENV/bin/pip" install --prefer-binary \
-    pyserial \
-    adafruit-circuitpython-adxl34x
+"$VENV/bin/pip" install --prefer-binary pyserial
 
 # tetra3rs — use staged aarch64 wheel (built by CI with Cortex-A53 + NEON),
 # fall back to PyPI.
+# Distribution name on PyPI is 'tetra3_python' (the Python bindings for
+# the 'tetra3' Rust crate, which imports as `tetra3rs`). The project
+# publishes the code under one name and the dist-info under another.
 TETRA3RS_SRC="$EFINDER_HOME/tetra3rs-src"
 TETRA3RS_WHEEL=$(ls "$TETRA3RS_SRC"/*.whl 2>/dev/null | head -1)
 if [ -n "$TETRA3RS_WHEEL" ]; then
     echo "  Installing tetra3rs from staged wheel: $TETRA3RS_WHEEL"
     "$VENV/bin/pip" install "$TETRA3RS_WHEEL"
 else
-    echo "  Installing tetra3rs from PyPI (pre-built ARM64 wheel)..."
-    "$VENV/bin/pip" install --prefer-binary tetra3rs
+    echo "  Installing tetra3_python from PyPI (pre-built ARM64 wheel)..."
+    "$VENV/bin/pip" install --prefer-binary tetra3_python
 fi
+
+# ---------------------------------------------------------------------------
+# Workaround for upstream packaging bug (as of tetra3_python 0.4.1):
+#   tetra3rs/__init__.py calls importlib.metadata.version("tetra3rs")
+# but the dist-info installed by pip is named `tetra3_python-*.dist-info`,
+# so the lookup raises PackageNotFoundError at import time, crashing
+# everything before the first solve.
+#
+# Fix: patch the one line in __init__.py to ask for the correct dist
+# name. Idempotent — running it a second time is a no-op.
+# ---------------------------------------------------------------------------
+TETRA3RS_INIT=$("$VENV/bin/python3" -c \
+    "import os, tetra3rs; print(os.path.join(os.path.dirname(tetra3rs.__file__), '__init__.py'))" 2>/dev/null || true)
+if [ -n "$TETRA3RS_INIT" ] && [ -f "$TETRA3RS_INIT" ]; then
+    if grep -q 'version("tetra3rs")' "$TETRA3RS_INIT"; then
+        echo "  Patching tetra3rs/__init__.py (upstream name-mismatch bug)..."
+        sudo sed -i 's/version("tetra3rs")/version("tetra3_python")/' "$TETRA3RS_INIT"
+    fi
+fi
+
+# Verify the fix: if this import fails, the database generation step
+# ahead will fail too — catch it here with a clear message instead.
+if ! "$VENV/bin/python3" -c "import tetra3rs; _ = tetra3rs.__version__" 2>/dev/null; then
+    echo "ERROR: tetra3rs import check failed after patch. Investigate with:"
+    echo "       $VENV/bin/python3 -c 'import tetra3rs'"
+    exit 1
+fi
+
 echo "  All Python packages installed."
 
 # ---------------------------------------------------------------------------
