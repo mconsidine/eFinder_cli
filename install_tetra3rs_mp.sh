@@ -345,34 +345,116 @@ cat > "$ST" <<'EOF'
 #!/bin/bash
 # station.sh — connect to external WiFi (station mode)
 # Usage: ~/station.sh [ssid] [password]
+#
+# Builds an explicit NetworkManager profile rather than relying on
+# `nmcli device wifi connect`'s security-mode inference, which fails
+# with "key-mgmt: property is missing" when the scan cache is stale
+# or incomplete.
 set -e
+
+_scan() {
+    # Trigger a rescan and wait up to 8 s for it to complete. The Pi Zero 2W
+    # has a single radio; if it just came off AP mode the scan takes a
+    # moment to populate.
+    nmcli device wifi rescan 2>/dev/null || true
+    for i in $(seq 1 8); do
+        if nmcli -f IN-USE,SSID,SECURITY device wifi list --rescan no \
+             2>/dev/null | grep -q '[A-Za-z0-9]'; then
+            return 0
+        fi
+        sleep 1
+    done
+}
+
 if [ -z "$1" ]; then
-    nmcli device wifi rescan 2>/dev/null || true; sleep 2
+    _scan
     echo "Available networks:"
-    nmcli -f SSID,SIGNAL,SECURITY device wifi list | head -20
+    nmcli -f SSID,SIGNAL,SECURITY device wifi list --rescan no | head -20
     read -rp "Enter SSID: " SSID
     read -rsp "Enter password (blank=open): " PASSWORD; echo ""
 else
     SSID="$1"; PASSWORD="${2:-}"
+    _scan
 fi
 [ -z "$SSID" ] && { echo "ERROR: SSID empty"; exit 1; }
-nmcli connection down efinder-ap 2>/dev/null || true
-if [ -n "$PASSWORD" ]; then
-    nmcli device wifi connect "$SSID" password "$PASSWORD" || {
-        echo "Failed — returning to AP mode"
-        nmcli connection up efinder-ap; exit 1; }
-else
-    nmcli device wifi connect "$SSID" || {
-        echo "Failed — returning to AP mode"
-        nmcli connection up efinder-ap; exit 1; }
+
+# Look up the security type for this SSID from the scan. If the network
+# is not visible, fail clearly rather than building a bad profile.
+SEC=$(nmcli -t -f SSID,SECURITY device wifi list --rescan no \
+      | awk -F: -v s="$SSID" '$1==s {print $2; exit}')
+
+if [ -z "$SEC" ]; then
+    echo "ERROR: SSID '$SSID' not found in scan."
+    echo "Visible networks:"
+    nmcli -f SSID,SIGNAL,SECURITY device wifi list --rescan no | head -20
+    exit 1
 fi
+
+echo "Connecting to: $SSID  (security: $SEC)"
+
+# Remove any stale profile with the same name so we rebuild from scratch.
+nmcli connection delete "$SSID" 2>/dev/null || true
+
+# Drop AP so the radio is free to associate.
+nmcli connection down efinder-ap 2>/dev/null || true
+
+# Build an explicit profile. Handle the three common cases:
+#   open       -> no security
+#   WPA/WPA2   -> wpa-psk
+#   WPA3 (SAE) -> sae
+case "$SEC" in
+    *SAE*|*WPA3*)
+        KEY_MGMT="sae"
+        ;;
+    *WPA*|*PSK*)
+        KEY_MGMT="wpa-psk"
+        ;;
+    ""|--)
+        KEY_MGMT=""
+        ;;
+    *)
+        echo "WARNING: unrecognized security '$SEC', trying wpa-psk"
+        KEY_MGMT="wpa-psk"
+        ;;
+esac
+
+if [ -n "$KEY_MGMT" ]; then
+    if [ -z "$PASSWORD" ]; then
+        echo "ERROR: network '$SSID' requires a password ($SEC)"
+        nmcli connection up efinder-ap 2>/dev/null || true
+        exit 1
+    fi
+    nmcli connection add type wifi ifname wlan0 con-name "$SSID" \
+        ssid "$SSID" \
+        wifi-sec.key-mgmt "$KEY_MGMT" \
+        wifi-sec.psk "$PASSWORD" \
+        connection.autoconnect no \
+        >/dev/null
+else
+    nmcli connection add type wifi ifname wlan0 con-name "$SSID" \
+        ssid "$SSID" \
+        connection.autoconnect no \
+        >/dev/null
+fi
+
+# Bring the profile up.
+if ! nmcli connection up "$SSID"; then
+    echo "Failed to activate '$SSID' — returning to AP mode"
+    nmcli connection delete "$SSID" 2>/dev/null || true
+    nmcli connection up efinder-ap 2>/dev/null || true
+    exit 1
+fi
+
+# Wait for a non-AP IP address.
 IP=""
-for i in $(seq 1 15); do
+for i in $(seq 1 20); do
     IP=$(ip -4 addr show wlan0 \
-        | grep -oP "(?<=inet )[\d.]+" | grep -v "192\.168\.50\.")
-    [ -n "$IP" ] && break; sleep 1
+         | grep -oP "(?<=inet )[\d.]+" | grep -v "192\.168\.50\." | head -1)
+    [ -n "$IP" ] && break
+    sleep 1
 done
 [ -z "$IP" ] && IP=$(hostname -I | awk '{print $1}')
+
 echo "Connected to: $SSID  IP: $IP"
 echo "SSH: ssh efinder@$IP"
 echo "Run ~/ap.sh to return to AP mode."
