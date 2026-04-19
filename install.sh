@@ -20,7 +20,7 @@ INSTALL_MARKER="$EFINDER_HOME/.efinder_installed"
 # Set to true if an ADXL343 accelerometer is wired to the I2C bus.
 # When false: python3-smbus is not installed, adafruit pip package is skipped,
 # and I2C is not enabled. The app handles absence gracefully at runtime.
-USE_ACCELEROMETER=false
+USE_ACCELEROMETER=true
 
 # Set to true to run apt upgrade after apt update.
 # On a freshly burned image this adds 5-15 minutes and is rarely necessary.
