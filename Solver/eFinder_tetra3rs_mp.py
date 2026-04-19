@@ -54,7 +54,7 @@ import numpy as np
 # Shared constants
 # ---------------------------------------------------------------------------
 home_path   = str(Path.home())
-version     = "6.6-tetra3rs-mp-tb3"
+version     = "6.6-tetra3rs-mp-tb4"
 config_path = os.path.join(home_path, "Solver/eFinder.config")
 solver_path = os.path.join(home_path, "Solver")
 
@@ -554,7 +554,7 @@ def solver_process(shm_names, frame_ready, cam_cmd_q, cam_result_q,
                     d = ImageDraw.Draw(img2)
                     d.text((5, 5), overlay, font=fnt, fill='white')
                 tmp = LIVE_IMAGE + '.tmp'
-                img2.save(tmp)
+                img2.save(tmp, format='JPEG')
                 os.replace(tmp, LIVE_IMAGE)
             except Exception as e:
                 print('[solver] live image write failed:', e)
