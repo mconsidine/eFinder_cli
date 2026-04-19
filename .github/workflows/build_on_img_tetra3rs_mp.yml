@@ -62,7 +62,10 @@ jobs:
 
       - name: Clone tetra3rs
         run: |
-          git clone --depth 1 https://github.com/mconsidine/tetra3rs.git
+          # Track upstream main for latest fixes. Change the URL or add
+          # --branch / specific commit hash here to pin.
+          git clone --depth 1 https://github.com/ssmichael1/tetra3rs.git
+          cd tetra3rs && echo "Built from commit: $(git rev-parse HEAD)"
 
       - name: Cache tetra3rs build
         uses: actions/cache@v4
