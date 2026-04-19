@@ -120,6 +120,12 @@ sudo -u "$EFINDER_USER" python3 -m venv "$VENV" --system-site-packages
 "$VENV/bin/pip" install --prefer-binary "Pillow>=9.0"
 "$VENV/bin/pip" install --prefer-binary pyserial
 
+# gaia-catalog: bundled Gaia DR3 + Hipparcos star data used by tetra3rs's
+# generate_from_gaia(). It *should* be an auto-dependency of tetra3_python,
+# but installing from a local wheel file skips dependency resolution, so
+# we install it explicitly to make the offline-install path work too.
+"$VENV/bin/pip" install --prefer-binary gaia-catalog
+
 # tetra3rs — use staged aarch64 wheel (built by CI with Cortex-A53 + NEON),
 # fall back to PyPI.
 # Distribution name on PyPI is 'tetra3_python' (the Python bindings for
@@ -154,11 +160,16 @@ if [ -n "$TETRA3RS_INIT" ] && [ -f "$TETRA3RS_INIT" ]; then
     fi
 fi
 
-# Verify the fix: if this import fails, the database generation step
-# ahead will fail too — catch it here with a clear message instead.
+# Verify the fix: if any of these imports fail, the database generation
+# step ahead will fail too — catch them here with clear messages instead.
 if ! "$VENV/bin/python3" -c "import tetra3rs; _ = tetra3rs.__version__" 2>/dev/null; then
     echo "ERROR: tetra3rs import check failed after patch. Investigate with:"
     echo "       $VENV/bin/python3 -c 'import tetra3rs'"
+    exit 1
+fi
+if ! "$VENV/bin/python3" -c "import gaia_catalog" 2>/dev/null; then
+    echo "ERROR: gaia_catalog import check failed (needed for generate_from_gaia)."
+    echo "       $VENV/bin/python3 -c 'import gaia_catalog'"
     exit 1
 fi
 
