@@ -297,7 +297,13 @@ for f in /var/lib/systemd/rfkill/*:wlan; do
     [ -f "$f" ] && echo 0 | sudo tee "$f" > /dev/null
 done
 
+# WiFi regulatory country. Defaults to US. For other countries, set the
+# WIFI_COUNTRY environment variable before running the installer, e.g.:
+#     WIFI_COUNTRY=GB sudo -E bash install.sh
+# (The -E preserves the environment across sudo.) CI-built images already
+# have this baked in by the workflow; this call just confirms it.
 WIFI_COUNTRY="${WIFI_COUNTRY:-US}"
+echo "  WiFi country: $WIFI_COUNTRY"
 sudo raspi-config nonint do_wifi_country "$WIFI_COUNTRY" 2>/dev/null || true
 
 MAC=$(cat /sys/class/net/wlan0/address 2>/dev/null || \

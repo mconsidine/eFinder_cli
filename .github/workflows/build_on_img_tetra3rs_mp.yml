@@ -9,6 +9,10 @@ on:
         description: 'WiFi AP password'
         required: true
         default: '12345678'
+      wifi_country:
+        description: 'WiFi regulatory country code (ISO 3166-1 alpha-2)'
+        required: false
+        default: 'US'
 
 jobs:
   build:
@@ -274,12 +278,30 @@ jobs:
           for f in /mnt/pi/var/lib/systemd/rfkill/*:wlan; do
               [ -f "$f" ] && echo 0 | sudo tee "$f" > /dev/null
           done
-          # Write regulatory domain
+
+          # ------------------------------------------------------------------
+          # WiFi regulatory domain — default US, override with workflow input.
+          # Baked into the image so the radio comes up with the correct
+          # regdomain from first boot without any user configuration step.
+          # ------------------------------------------------------------------
+          WIFI_COUNTRY="${{ github.event.inputs.wifi_country || 'US' }}"
+          echo "  WiFi country: $WIFI_COUNTRY"
+
+          # wpa_supplicant
           sudo mkdir -p /mnt/pi/etc/wpa_supplicant
-          echo "country=US"                                        | sudo tee    /mnt/pi/etc/wpa_supplicant/wpa_supplicant.conf > /dev/null
+          echo "country=$WIFI_COUNTRY"                             | sudo tee    /mnt/pi/etc/wpa_supplicant/wpa_supplicant.conf > /dev/null
           echo "ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev" | sudo tee -a /mnt/pi/etc/wpa_supplicant/wpa_supplicant.conf > /dev/null
           echo "update_config=1"                                   | sudo tee -a /mnt/pi/etc/wpa_supplicant/wpa_supplicant.conf > /dev/null
-          echo "REGDOMAIN=US" | sudo tee /mnt/pi/etc/default/crda > /dev/null
+
+          # crda / regulatory domain env
+          echo "REGDOMAIN=$WIFI_COUNTRY" | sudo tee /mnt/pi/etc/default/crda > /dev/null
+
+          # raspi-config state file — this is what raspi-config reads as
+          # "the current country" without asking. Writing it here means
+          # the post-boot installer's `raspi-config nonint do_wifi_country`
+          # call is a no-op rather than a configuration step.
+          sudo mkdir -p /mnt/pi/etc/default
+          echo "WIFI_COUNTRY=$WIFI_COUNTRY" | sudo tee /mnt/pi/etc/default/raspiwifi > /dev/null 2>&1 || true
 
           # ------------------------------------------------------------------
           # Stage application files
