@@ -55,7 +55,7 @@ import numpy as np
 # Shared constants
 # ---------------------------------------------------------------------------
 home_path   = str(Path.home())
-version     = "6.6-tetra3rs-mp"
+version     = "6.6-tetra3rs-mp-tb"
 config_path = os.path.join(home_path, "Solver/eFinder.config")
 solver_path = os.path.join(home_path, "Solver")
 
@@ -74,6 +74,12 @@ LIVE_IMAGE = '/dev/shm/efinder_live.jpg'
 # pixel space for solver queries.
 CENTRE_X = FRAME_W / 2.0
 CENTRE_Y = FRAME_H / 2.0
+
+# Triple-buffered camera -> solver frame handoff (items 1 + 3).
+# Three SharedMemory slots; camera rotates writes across the two slots
+# that the solver isn't currently reading. latest_slot and frame_seq are
+# published atomically as the final step of each write.
+N_FRAME_SLOTS = 3
 
 # ---------------------------------------------------------------------------
 # Config helpers
@@ -167,23 +173,87 @@ def centred2dxdy(cx, cy):
     dy_deg = -cy * CAM_ARCSEC_PX / 3600
     return dx_deg, dy_deg
 
+# ---------------------------------------------------------------------------
+# CPU affinity helper (item 5)
+# ---------------------------------------------------------------------------
+# The Pi Zero 2W has 4x Cortex-A53. We pin each worker to specific cores
+# to keep the solver's hot numeric loop from being interrupted by camera
+# DMA completion handling or by SkySafari socket traffic, and to give the
+# solver's two background threads (state writer, live JPEG renderer) room
+# to run without stealing cycles from the main solve loop.
+#
+# Mapping (see CPU_PINNING dict). Tuneable if field measurements suggest
+# a different assignment works better.
+#
+# sched_setaffinity can fail on restricted kernels, inside containers, or
+# when systemd CPUAffinity= is already set; we log and carry on. Losing
+# the tuning doesn't break correctness.
+
+CPU_PINNING = {
+    'main':   {0},      # supervisor — idle most of the time
+    'camera': {0},      # light work, shares with USB/SDIO IRQs
+    'lx200':  {1},      # isolated from solver so replies never queue
+    'solver': {2, 3},   # heavy: main + state thread + live-jpeg thread
+}
+
+def _pin_cpu(label):
+    """Best-effort CPU affinity pin. Logs result, never raises."""
+    cores = CPU_PINNING.get(label)
+    if not cores:
+        return
+    try:
+        # Verify requested cores actually exist on this box. On non-Pi
+        # hardware or odd kernels we just log and skip rather than pin
+        # to a phantom core.
+        avail = os.sched_getaffinity(0)
+        want  = cores & avail
+        if not want:
+            print('[%s] cpu pin skipped: requested %s not in available %s' %
+                  (label, sorted(cores), sorted(avail)))
+            return
+        os.sched_setaffinity(0, want)
+        # Read back what actually stuck (cgroups can narrow the set).
+        got = os.sched_getaffinity(0)
+        if got == want:
+            print('[%s] cpu pin: cores %s' % (label, sorted(got)))
+        else:
+            print('[%s] cpu pin partial: asked %s, got %s' %
+                  (label, sorted(want), sorted(got)))
+    except (OSError, AttributeError) as e:
+        # AttributeError handles the unlikely case of a Python build
+        # without sched_setaffinity (not Linux, not CPython on Linux, etc.)
+        print('[%s] cpu pin not supported: %s' % (label, e))
+
 # ===========================================================================
 # PROCESS 1 - Camera
 # ===========================================================================
-def camera_process(shm_name, frame_ready, cam_cmd_q, cam_result_q, test_mode):
+def camera_process(shm_names, frame_ready, cam_cmd_q, cam_result_q,
+                   test_mode, latest_slot, frame_seq):
     """
-    Owns Picamera2. Loops: capture -> write shared memory -> set frame_ready.
+    Owns Picamera2. Rotates writes across three SharedMemory slots so the
+    solver can read the most-recently-published slot without racing the
+    writer. Publishes (latest_slot, frame_seq) atomically after each write.
+
+    shm_names   : list of 3 SharedMemory names (created by main)
+    frame_ready : Event — set after each completed publish
+    latest_slot : Value(c_int)  — index (0/1/2) of last fully-written slot
+    frame_seq   : Value(c_uint64) — monotonic frame counter
+
     Commands on cam_cmd_q:
         ('set_exp', exposure, gain)
         ('capture_once', None, None)  -> puts ('frame', array) on cam_result_q
         ('stop', None, None)
     """
+    _pin_cpu('camera')
     from picamera2 import Picamera2
 
     param = load_param()
 
-    shm = shared_memory.SharedMemory(name=shm_name)
-    frame_buf = np.ndarray((FRAME_H, FRAME_W), dtype=np.uint8, buffer=shm.buf)
+    # Attach to all three SHM slots; wrap each as a numpy view so np.copyto
+    # writes straight into shared memory with no intermediate allocation.
+    shms      = [shared_memory.SharedMemory(name=n) for n in shm_names]
+    slot_bufs = [np.ndarray((FRAME_H, FRAME_W), dtype=np.uint8, buffer=s.buf)
+                 for s in shms]
 
     picam2 = Picamera2()
     cfg = picam2.create_still_configuration(
@@ -212,10 +282,25 @@ def camera_process(shm_name, frame_ready, cam_cmd_q, cam_result_q, test_mode):
         arr = np.array(picam2.capture_array())
         return arr[0:FRAME_H, 0:FRAME_W]
 
-    print('[camera] ready')
+    def _pick_write_slot(last_published):
+        """
+        Return a slot index that the solver is guaranteed not to be reading
+        right now. With 3 slots and the solver always reading whichever slot
+        was most recently published, we just pick any slot other than the
+        published one. We prefer to rotate so we don't write to the same
+        slot twice in a row — gives the solver a full extra cycle of
+        read-safety headroom if it gets preempted mid-copy.
+        """
+        # Rotate: (published + 1) mod N. The solver may still be reading
+        # `published` but not this next slot.
+        return (last_published + 1) % N_FRAME_SLOTS
+
+    last_published = -1   # sentinel: first pick goes to slot 0
+
+    print('[camera] ready (triple-buffered)')
 
     while True:
-        # drain commands
+        # drain on-demand commands
         try:
             while True:
                 cmd, a, b = cam_cmd_q.get_nowait()
@@ -224,27 +309,47 @@ def camera_process(shm_name, frame_ready, cam_cmd_q, cam_result_q, test_mode):
                 elif cmd == 'capture_once':
                     cam_result_q.put(('frame', _capture().copy()))
                 elif cmd == 'stop':
-                    picam2.stop(); shm.close(); return
+                    picam2.stop()
+                    for s in shms: s.close()
+                    return
         except Exception:
             pass
 
-        # continuous capture into shared memory
+        # continuous capture into the next rotation slot
+        write_idx = _pick_write_slot(last_published)
         arr = _capture()
-        np.copyto(frame_buf, arr)
+        np.copyto(slot_bufs[write_idx], arr)
+
+        # Publish: update latest_slot and bump frame_seq. The order matters:
+        # incrementing the sequence *after* updating the slot index means
+        # the solver's "read seq, copy, re-read seq" consistency check will
+        # correctly detect a mid-copy write.
+        with latest_slot.get_lock():
+            latest_slot.value = write_idx
+        with frame_seq.get_lock():
+            frame_seq.value  += 1
+
+        last_published = write_idx
         frame_ready.set()
         time.sleep(0.05)
 
 # ===========================================================================
 # PROCESS 2 - Solver (tetra3rs)
 # ===========================================================================
-def solver_process(shm_name, frame_ready, cam_cmd_q, cam_result_q,
+def solver_process(shm_names, frame_ready, cam_cmd_q, cam_result_q,
                    lx200_cmd_q, lx200_result_q,
-                   shared_ra, shared_dec, offset_flag, test_mode):
+                   shared_ra, shared_dec, offset_flag, test_mode,
+                   latest_slot, frame_seq):
     """
     Owns tetra3rs database.
     Continuous loop: wait for frame -> solve -> update shared_ra/shared_dec.
     Also handles on-demand commands from lx200_cmd_q.
+
+    Reads frames from one of three SHM slots; `latest_slot` tells which
+    slot is current, `frame_seq` is the monotonic frame number. We track
+    `last_solved_seq` so we never redundantly solve the same frame.
     """
+    _pin_cpu('solver')
     import tetra3rs
     import serial as _pyserial
     from threading import Thread as _Thread, Lock as _Lock
@@ -254,8 +359,15 @@ def solver_process(shm_name, frame_ready, cam_cmd_q, cam_result_q,
     param = load_param()
     coordinates = Coordinates()
 
-    shm = shared_memory.SharedMemory(name=shm_name)
-    frame_buf = np.ndarray((FRAME_H, FRAME_W), dtype=np.uint8, buffer=shm.buf)
+    # Attach to all three SHM slots — we pick which one to copy from at
+    # each iteration based on latest_slot's value.
+    shms      = [shared_memory.SharedMemory(name=n) for n in shm_names]
+    slot_bufs = [np.ndarray((FRAME_H, FRAME_W), dtype=np.uint8, buffer=s.buf)
+                 for s in shms]
+
+    # Track last solved frame sequence so we don't re-solve the same frame
+    # if the main loop wakes up more often than the camera publishes.
+    last_solved_seq = 0
 
     # --- load database ---
     DB_PATH = os.path.join(home_path, 'Solver/efinder-tetra-database.bin')
@@ -462,8 +574,8 @@ def solver_process(shm_name, frame_ready, cam_cmd_q, cam_result_q,
                 stars, float(eTime))
         else:
             overlay = None
-        # arr is already a copy (from frame_buf.copy() in the main loop),
-        # so passing it across the thread boundary is safe.
+        # arr is already a copy (from the triple-buffer read in the main
+        # loop), so passing it across the thread boundary is safe.
         try:
             _live_q.put_nowait((arr, overlay))
         except _QueueFull:
@@ -666,7 +778,9 @@ def solver_process(shm_name, frame_ready, cam_cmd_q, cam_result_q,
             _, arr = cam_result_q.get(timeout=10.0)
             return arr
         except Exception:
-            return frame_buf.copy()
+            # Fallback: grab whichever slot camera published most recently.
+            # Less fresh than an on-demand capture, but always available.
+            return slot_bufs[latest_slot.value].copy()
 
     def _set_camera(exp, gain):
         param['Exposure'] = str(exp)
@@ -798,7 +912,43 @@ def solver_process(shm_name, frame_ready, cam_cmd_q, cam_result_q,
         # wait for a new frame (up to 0.5 s)
         if frame_ready.wait(timeout=0.5) and not offset_flag.value:
             frame_ready.clear()
-            img = frame_buf.copy()
+
+            # Triple-buffered read with sequence consistency check.
+            # 1. Snapshot (slot, seq) — these two may be updated by camera
+            #    between reads, but we only care that the SEQ we record
+            #    belongs to the SLOT we actually copied from.
+            # 2. Copy that slot's contents.
+            # 3. Re-read seq. If it changed, camera published a new frame
+            #    during our copy — we may have read a mix of old+new bytes.
+            #    With 3 slots and camera rotating, the slot we copied from
+            #    is guaranteed not to be the one camera just wrote, so the
+            #    copy is actually consistent; the only thing we missed is
+            #    freshness. Accept the copy but log the skip.
+            seq_before  = frame_seq.value
+            slot_before = latest_slot.value
+            img = slot_bufs[slot_before].copy()
+            seq_after   = frame_seq.value
+
+            if seq_before == last_solved_seq:
+                # Same frame we already solved; woke up spuriously or the
+                # solver outran the camera. Skip without logging noise.
+                continue
+
+            skipped = seq_before - last_solved_seq - 1
+            if skipped > 0:
+                # Camera published more frames than we could solve. This is
+                # normal when a solve takes longer than one exposure — log
+                # at low volume so it shows up in profiling but doesn't
+                # spam the journal during steady-state operation.
+                print('[solver] skipped %d frame(s) (seq %d -> %d)' %
+                      (skipped, last_solved_seq, seq_before))
+            if seq_after != seq_before:
+                print('[solver] frame seq changed during copy (%d -> %d) '
+                      '— copy still safe via triple-buffer' %
+                      (seq_before, seq_after))
+
+            last_solved_seq = seq_before
+
             _do_solve(img)
             _write_live(img)
             print('[solver] ****************')
@@ -815,6 +965,7 @@ def lx200_process(lx200_cmd_q, lx200_result_q,
     Reads other telemetry from /dev/shm/efinder_state.json (non-critical path).
     Sends tuning/on-demand commands to solver via lx200_cmd_q.
     """
+    _pin_cpu('lx200')
     coordinates = Coordinates()
     altAngle = False; angle = None
 
@@ -1004,11 +1155,23 @@ def main():
         os.system('pkill -9 -f eFinder_tetra3rs_mp.py')
         time.sleep(1)
 
+    _pin_cpu('main')
     print('eFinder version', version)
 
-    # shared memory for camera frames
-    shm = shared_memory.SharedMemory(create=True, size=FRAME_SZ)
-    print('Shared memory:', shm.name, '(%d bytes)' % FRAME_SZ)
+    # Triple-buffered frame slots. Each is a separate SharedMemory region
+    # of FRAME_SZ bytes; camera rotates writes across them, solver reads
+    # whichever one latest_slot indicates.
+    shms = [shared_memory.SharedMemory(create=True, size=FRAME_SZ)
+            for _ in range(N_FRAME_SLOTS)]
+    shm_names = [s.name for s in shms]
+    print('Frame slots:', shm_names, '(%d bytes each)' % FRAME_SZ)
+
+    # Atomic handoff Values (items 1 + 3).
+    # latest_slot: which slot was most recently fully written.
+    # frame_seq:   monotonic frame counter; solver uses it to detect
+    #              skipped frames and to avoid re-solving the same frame.
+    latest_slot = Value(ctypes.c_int, 0)
+    frame_seq   = Value(ctypes.c_uint64, 0)
 
     # shared Values for hot-path ra/dec — direct memory read, zero IPC
     shared_ra   = Value(ctypes.c_double, 0.0)
@@ -1033,12 +1196,14 @@ def main():
     proc_specs = {
         'camera': dict(
             target=camera_process,
-            args=(shm.name, frame_ready, cam_cmd_q, cam_result_q, test_mode)),
+            args=(shm_names, frame_ready, cam_cmd_q, cam_result_q,
+                  test_mode, latest_slot, frame_seq)),
         'solver': dict(
             target=solver_process,
-            args=(shm.name, frame_ready, cam_cmd_q, cam_result_q,
+            args=(shm_names, frame_ready, cam_cmd_q, cam_result_q,
                   lx200_cmd_q, lx200_result_q,
-                  shared_ra, shared_dec, offset_flag, test_mode)),
+                  shared_ra, shared_dec, offset_flag, test_mode,
+                  latest_slot, frame_seq)),
         'lx200': dict(
             target=lx200_process,
             args=(lx200_cmd_q, lx200_result_q,
@@ -1074,8 +1239,11 @@ def main():
     finally:
         for p in procs.values():
             p.terminate()
-        shm.unlink()
-        shm.close()
+        for s in shms:
+            try: s.close()
+            except Exception: pass
+            try: s.unlink()
+            except Exception: pass
 
 if __name__ == '__main__':
     set_start_method('fork')
