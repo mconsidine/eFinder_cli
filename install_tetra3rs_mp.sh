@@ -89,6 +89,43 @@ for i in $(seq 1 12); do
     echo "  Waiting... ($i/12)"; sleep 5
 done
 
+# ---------------------------------------------------------------------------
+# Time zone and locale (configured before apt so the upgrade's locale-gen
+# step produces the right one, avoiding the cosmetically confusing
+# "Generating locales... en_GB.UTF-8" line in the install log).
+#
+# Base image ships with Europe/London + en_GB.UTF-8 (upstream's origin).
+# Default to UTC + en_US.UTF-8 here. UTC is convention for astronomy logs
+# and matches what SkySafari sends over LX200 :SC# (which sets system UTC
+# directly). en_US.UTF-8 gives familiar number/date formatting for US users.
+#
+# Override via env vars (use -E with sudo to preserve them):
+#     TIMEZONE="Europe/Paris"  LOCALE="fr_FR.UTF-8"  sudo -E bash install.sh
+# Use `timedatectl list-timezones` to see valid TZ names.
+# ---------------------------------------------------------------------------
+TIMEZONE="${TIMEZONE:-UTC}"
+LOCALE="${LOCALE:-en_US.UTF-8}"
+
+echo ""
+echo "[0/9] Configuring locale and timezone..."
+echo "  Time zone: $TIMEZONE"
+if [ -f "/usr/share/zoneinfo/$TIMEZONE" ]; then
+    sudo timedatectl set-timezone "$TIMEZONE" 2>/dev/null || \
+        sudo ln -sf "/usr/share/zoneinfo/$TIMEZONE" /etc/localtime
+    echo "$TIMEZONE" | sudo tee /etc/timezone > /dev/null
+else
+    echo "  WARNING: timezone '$TIMEZONE' not found, leaving system default"
+fi
+
+echo "  Locale: $LOCALE"
+# Uncomment the requested locale in /etc/locale.gen if it isn't already
+# available, then regenerate. Idempotent.
+if ! locale -a 2>/dev/null | grep -qi "^${LOCALE//-/}\$\|^${LOCALE}\$"; then
+    sudo sed -i "s/^# *\($(echo "$LOCALE" | sed 's/\./\\./g') .*\)/\1/" /etc/locale.gen 2>/dev/null || true
+    sudo locale-gen "$LOCALE" 2>/dev/null || true
+fi
+sudo update-locale LANG="$LOCALE" LC_ALL="$LOCALE" 2>/dev/null || true
+
 echo ""
 echo "[1/9] Updating system packages..."
 sudo apt-get update -q
@@ -142,22 +179,34 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Workaround for upstream packaging bug (as of tetra3_python 0.4.1):
+# Workaround for upstream packaging bug (as of tetra3_python 0.4.1–0.6.0+):
 #   tetra3rs/__init__.py calls importlib.metadata.version("tetra3rs")
 # but the dist-info installed by pip is named `tetra3_python-*.dist-info`,
 # so the lookup raises PackageNotFoundError at import time, crashing
 # everything before the first solve.
 #
-# Fix: patch the one line in __init__.py to ask for the correct dist
-# name. Idempotent — running it a second time is a no-op.
+# We cannot use `import tetra3rs` to find __init__.py — the import is
+# what's broken. Instead, ask pip directly via its sysconfig-based
+# site-packages path. This also survives future Python versions where
+# the path contains 'python3.14', etc.
 # ---------------------------------------------------------------------------
-TETRA3RS_INIT=$("$VENV/bin/python3" -c \
-    "import os, tetra3rs; print(os.path.join(os.path.dirname(tetra3rs.__file__), '__init__.py'))" 2>/dev/null || true)
-if [ -n "$TETRA3RS_INIT" ] && [ -f "$TETRA3RS_INIT" ]; then
+SITE_PACKAGES=$("$VENV/bin/python3" -c \
+    "import sysconfig; print(sysconfig.get_paths()['purelib'])" 2>/dev/null || true)
+TETRA3RS_INIT=""
+if [ -n "$SITE_PACKAGES" ] && [ -f "$SITE_PACKAGES/tetra3rs/__init__.py" ]; then
+    TETRA3RS_INIT="$SITE_PACKAGES/tetra3rs/__init__.py"
+fi
+
+if [ -n "$TETRA3RS_INIT" ]; then
     if grep -q 'version("tetra3rs")' "$TETRA3RS_INIT"; then
-        echo "  Patching tetra3rs/__init__.py (upstream name-mismatch bug)..."
+        echo "  Patching $TETRA3RS_INIT (upstream name-mismatch bug)..."
         sudo sed -i 's/version("tetra3rs")/version("tetra3_python")/' "$TETRA3RS_INIT"
+    else
+        echo "  tetra3rs/__init__.py already patched or upstream bug is fixed — no action."
     fi
+else
+    echo "  WARNING: could not locate tetra3rs/__init__.py; if the import"
+    echo "  check below fails, patch it manually."
 fi
 
 # Verify the fix: if any of these imports fail, the database generation
@@ -469,10 +518,17 @@ if [ -n "$KEY_MGMT" ]; then
         nmcli connection up efinder-ap 2>/dev/null || true
         exit 1
     fi
+    # psk-flags=0 tells NM to store the PSK in the connection profile file
+    # itself, not rely on a secret agent (gnome-keyring / polkit / etc.).
+    # Pi OS Lite has no such agent running, so the default flag (1 =
+    # agent-owned) causes `connection up` to fail with "Secrets were
+    # required, but not provided" even though we just passed the PSK to
+    # `connection add`. Flag 0 sidesteps that entire dance.
     nmcli connection add type wifi ifname wlan0 con-name "$SSID" \
         ssid "$SSID" \
         wifi-sec.key-mgmt "$KEY_MGMT" \
         wifi-sec.psk "$PASSWORD" \
+        wifi-sec.psk-flags 0 \
         connection.autoconnect no \
         >/dev/null
 else
