@@ -371,7 +371,7 @@ jobs:
           retention-days: 14
 
       - name: Create Release
-        uses: softprops/action-gh-release@v4
+        uses: softprops/action-gh-release@v2
         with:
           name: ${{ env.ARTIFACT_NAME }}
           files: 2025-10-01-raspios-trixie-arm64-lite.img.xz
