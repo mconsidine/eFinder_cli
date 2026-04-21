@@ -192,7 +192,7 @@ CPU_PINNING = {
     'main':   {0},      # supervisor — idle most of the time
     'camera': {0},      # light work, shares with USB/SDIO IRQs
     'lx200':  {1},      # isolated from solver so replies never queue
-    'solver': {2, 3},   # heavy: main + state thread + live-jpeg thread
+    'solver': {2},   # heavy: main + state thread + live-jpeg thread #MattC
 }
 
 def _pin_cpu(label):
@@ -601,7 +601,7 @@ def solver_process(shm_names, frame_ready, cam_cmd_q, cam_result_q,
         if frame_n > 100:
             keep = False; frame_n = 0
             
-    def _centroids_similar(prev, curr, max_shift_px=2.0, max_mismatch=3):
+    def _centroids_similar(prev, curr, max_shift_px=2.0, max_mismatch=3): #MattC
         """
         Fast similarity check between two centroid lists.
         Assumes both are sorted brightest-first (tetra3rs guarantees this).
@@ -638,15 +638,16 @@ def solver_process(shm_names, frame_ready, cam_cmd_q, cam_result_q,
         )
         centroid_list = extraction.centroids
         
-        # Skip solve if scene hasn't changed
+        # Skip solve if scene hasn't changed #MattC
         if solve and _centroids_similar(centroids_last, centroid_list):
             # Still update shared RA/Dec so LX200 stays responsive
             shared_ra.value  = solved_radec[0]
             shared_dec.value = solved_radec[1]
             return True
         
-        img_peak = int(np.max(np_img))
-
+        #img_peak = int(np.max(np_img)) #MattC
+        img_peak = int(np_img[centroid_list[0].x,centroid_list[0].y) #MattC
+        
         print('[solver] centroids=%d  peak=%d' % (len(centroid_list), img_peak))
 
         if len(centroid_list) < 15:
