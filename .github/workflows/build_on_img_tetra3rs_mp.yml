@@ -375,9 +375,7 @@ jobs:
         with:
           name: ${{ env.ARTIFACT_NAME }}
           files: 2025-10-01-raspios-trixie-arm64-lite.img.xz
-          compression-level: 0
-          if-no-files-found: error
-          retention-days: 14
+          tag-name: "tetra3rs_mp_v1.0.0"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
