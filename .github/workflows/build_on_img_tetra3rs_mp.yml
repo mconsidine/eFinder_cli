@@ -370,6 +370,17 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      - name: Create Release
+        uses: softprops/action-gh-release@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          files: 2025-10-01-raspios-trixie-arm64-lite.img.xz
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 14
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Upload build logs on failure
         if: failure()
         run: |
