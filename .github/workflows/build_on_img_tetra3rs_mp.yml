@@ -375,7 +375,7 @@ jobs:
         with:
           name: ${{ env.ARTIFACT_NAME }}
           files: 2025-10-01-raspios-trixie-arm64-lite.img.xz
-          tag-name: "tetra3rs_mp_v1.0.0"
+          tag_name: "tetra3rs_mp_v1.0.0"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
