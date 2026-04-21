@@ -600,6 +600,27 @@ def solver_process(shm_names, frame_ready, cam_cmd_q, cam_result_q,
         img2.save(os.path.join(home_path, 'Solver/images/capture.jpg'))
         if frame_n > 100:
             keep = False; frame_n = 0
+            
+    def _centroids_similar(prev, curr, max_shift_px=2.0, max_mismatch=3):
+        """
+        Fast similarity check between two centroid lists.
+        Assumes both are sorted brightest-first (tetra3rs guarantees this).
+        """
+        if not prev or not curr:
+            return False
+    
+        n = min(len(prev), len(curr), 10)  # only compare top 10
+        mismatch = 0
+    
+        for i in range(n):
+            dx = prev[i].x - curr[i].x
+            dy = prev[i].y - curr[i].y
+            if dx*dx + dy*dy > max_shift_px * max_shift_px:
+                mismatch += 1
+                if mismatch > max_mismatch:
+                    return False
+    
+        return True
 
     def _do_solve(img):
         nonlocal solve, solved_radec, solution, firstCentroid, centroids_last
@@ -616,6 +637,14 @@ def solver_process(shm_names, frame_ready, cam_cmd_q, cam_result_q,
             max_centroids=MAX_CENTROIDS,
         )
         centroid_list = extraction.centroids
+        
+        # Skip solve if scene hasn't changed
+        if solve and _centroids_similar(centroids_last, centroid_list):
+            # Still update shared RA/Dec so LX200 stays responsive
+            shared_ra.value  = solved_radec[0]
+            shared_dec.value = solved_radec[1]
+            return True
+        
         img_peak = int(np.max(np_img))
 
         print('[solver] centroids=%d  peak=%d' % (len(centroid_list), img_peak))
@@ -925,7 +954,7 @@ def solver_process(shm_names, frame_ready, cam_cmd_q, cam_result_q,
             #    freshness. Accept the copy but log the skip.
             seq_before  = frame_seq.value
             slot_before = latest_slot.value
-            img = slot_bufs[slot_before].copy()
+            img = slot_bufs[slot_before] #.copy()  #MattC
             seq_after   = frame_seq.value
 
             if seq_before == last_solved_seq:
