@@ -4,7 +4,7 @@ this needs to be rewritten
 
 Plate-solving electronic finder scope for the Raspberry Pi Zero 2W.  
 Connects to **SkySafari** over WiFi using the LX200 protocol on TCP port 4060.  
-Uses an **IMX477 camera** (Raspberry Pi HQ Camera or Arducam IMX477) and the **Tetra3** star-pattern matching library for fast, reliable plate solving.
+Uses an **IMX477 camera** (Raspberry Pi HQ Camera or Arducam IMX477) and the **Tetra3rs** star-pattern matching library for fast, reliable plate solving.
 
 ---
 
@@ -21,6 +21,12 @@ Uses an **IMX477 camera** (Raspberry Pi HQ Camera or Arducam IMX477) and the **T
 
 ## Part 1 — Burn the SD Card
 
+### 0.1 Download OS image
+
+Under releases there should be an archive of a pre-built Pi
+OS.  Download it and if necessary extract it from its zip 
+file so that a .xz version is available
+
 ### 1.1 Download Raspberry Pi Imager
 
 Download and install **Raspberry Pi Imager** from:  
@@ -29,31 +35,18 @@ https://www.raspberrypi.com/software/
 ### 1.2 Choose OS
 
 - Click **Choose OS**
-- Select **Raspberry Pi OS (other)**
-- Select **Raspberry Pi OS Lite (64-bit)**  
-  *(Bookworm. Do not use the Desktop version — it is not needed and wastes space.)*
+- Select **Use Custom**
+- Select the local .xz file extracted in step 0.1 
 
 ### 1.3 Choose Storage
 
 Insert your MicroSD card and select it.
 
-### 1.4 Configure OS Settings
+### 1.4 DO NOT Configure OS Settings
 
-Click the **gear icon** (or press Ctrl+Shift+X) to open the advanced settings panel.  
-Fill in the following — these must be set before burning:
-
-| Setting | Value |
-|---------|-------|
-| Hostname | `efinder` |
-| Username | `efinder` |
-| Password | *(choose a strong password — you will use this to SSH in)* |
-| WiFi SSID | *(your home WiFi network name)* |
-| WiFi Password | *(your home WiFi password)* |
-| WiFi country | *(your country code, e.g. US)* |
-| Enable SSH | ✓ (use password authentication) |
-| Locale / timezone | *(set to your timezone)* |
-
-> **Why home WiFi?** The Pi needs internet access during installation to download packages. After installation it will switch to AP (hotspot) mode automatically. Your home WiFi credentials are only used once.
+The Pi needs internet access during installation to download packages. After installation you will access it and
+switch it to STA (station) mode so that it has internet access.  Afterwards, it will switch to AP (hotspot) mode automatically. 
+Your home WiFi credentials are only used once.
 
 ### 1.5 Write the Image
 
@@ -61,7 +54,7 @@ Click **Write** and wait for the process to complete. Eject the card safely when
 
 ---
 
-## Part 2 — First Boot
+## Part 2 — First Boot without a data tether
 
 ### 2.1 Insert the Card and Power On
 
@@ -91,43 +84,55 @@ ssh efinder@efinder.local
 
 If `efinder.local` does not resolve, find the IP from your router and use it directly. Alternatively install **PuTTY** (https://www.putty.org) for a graphical SSH client — enter hostname `efinder.local` or the IP address, port `22`, and connect.
 
-Log in with the password you set in the Imager.
+Log in with the password 12345678.
 
+## OR
+
+## Part 2 — First Boot with a data tether
+
+### 2.1 Insert the Card and Power On
+
+Insert the MicroSD card into the Pi Zero 2W.  
+Connect power to the **DATA/PWr** micro-USB port (the inner port).  
+Wait approximately 60–90 seconds for first boot to complete.
+
+The use a serial terminal program or 'screen' (on linux) to access
+the Pi at something like /dev/ttyUSB0 or /dev/ttyACM0 (linux)
+
+Login with username efinder and the password 12345678
+
+### 
 ---
 
 ## Part 3 — Install eFinder
 
 All commands below are run on the Pi over SSH.
 
-### 3.1 Clone the Repository
+### 3.1 Put device into Station mode for internet access
 
 ```bash
-git clone --branch tinySS https://github.com/mconsidine/eFinder_cli.git
-cd eFinder_cli
+sudo bash ~/station.sh
 ```
 
 ### 3.2 Run the Installer
 
 ```bash
-sudo bash install.sh
+sudo bash ~/install.sh
 ```
 
-The installer will work through the following steps automatically:
+The installer will work through a number of steps automatically, among
+which are:
 
 | Step | What happens |
 |------|-------------|
-| 1 | System packages updated |
-| 2 | Required packages installed (picamera2, PIL, scipy, Samba, Apache, PHP) |
-| 3 | Python virtual environment created at `~/venv-efinder` |
-| 4 | This repository cloned to `~/eFinder_cli` |
-| 5 | Working directories created, support files deployed |
-| 6 | Tetra3 plate-solving library installed and star databases downloaded |
-| 7 | Samba file share configured |
-| 8 | Apache/PHP web server configured for OTA updates |
-| 9 | `/boot/firmware/config.txt` updated for IMX477 camera and USB serial gadget |
-| 10–12 | SSH, I2C, USB serial console enabled |
-| 13 | `eFinder.py` deployed |
-| 14–16 | systemd services installed for auto-start on boot |
+| a | Working directories created, support files deployed |
+| b | Tetra3 plate-solving library installed and star databases downloaded |
+| c | Samba file share configured |
+| d | Apache/PHP web server configured for OTA updates |
+| e | `/boot/firmware/config.txt` updated for IMX477 camera and USB serial gadget |
+| f | SSH, I2C, USB serial console enabled |
+| g | `eFinder.py` deployed |
+| h | systemd services installed for auto-start on boot |
 
 > **Duration:** The Tetra3 database download is the longest step — allow 10–20 minutes depending on your connection speed. Do not interrupt the installer once it has started.
 
@@ -165,6 +170,10 @@ From a device connected to the eFinder WiFi, open a terminal and SSH in:
 ```bash
 ssh efinder@192.168.50.1
 ```
+or
+```bash
+ssh efinder@efinder.local
+```
 
 Check the service status:
 
@@ -178,7 +187,7 @@ You should see `active (running)`. To watch the live log:
 journalctl -u efinder -f
 ```
 
-A healthy startup looks like:
+A healthy startup has logging info like:
 
 ```
 eFinder version 6.6
@@ -204,7 +213,7 @@ In SkySafari, go to **Settings → Telescope → Setup**:
 |---------|-------|
 | Scope Type | Meade LX-200 GPS |
 | Mount Type | Alt-Az (or match your mount) |
-| IP Address | `192.168.50.1` |
+| IP Address | `192.168.50.1` or `efinder.local`|
 | Port | `4060` |
 
 ### 5.2 Connect
@@ -229,94 +238,7 @@ No interaction with the Pi is needed during normal use.
 
 ## Part 7 — Focusing
 
-The eFinder application must **not** be running while you focus, since it holds the camera exclusively. Stop it first:
-
-```bash
-sudo systemctl stop efinder
-```
-
-Restart it when done:
-
-```bash
-sudo systemctl start efinder
-```
-
-### Method 1 — Single Frame Capture (Recommended)
-
-Take a still image using the same exposure and gain settings the app uses, then pull it to your laptop to inspect:
-
-```bash
-libcamera-still \
-  --width 960 --height 760 \
-  --shutter 200000 \
-  --gain 20 \
-  --awbgains 1,1 \
-  --nopreview \
-  -o /tmp/focus_test.jpg
-```
-
-Then on your laptop:
-
-```bash
-# macOS
-scp efinder@192.168.50.1:/tmp/focus_test.jpg . && open focus_test.jpg
-
-# Linux
-scp efinder@192.168.50.1:/tmp/focus_test.jpg . && xdg-open focus_test.jpg
-```
-
-**Windows** — run in PowerShell:
-
-```powershell
-scp efinder@192.168.50.1:/tmp/focus_test.jpg .
-```
-
-Then open `focus_test.jpg` from File Explorer, or use a viewer like **IrfanView** that lets you zoom to 100% to judge star sharpness. If you have **WinSCP** installed you can browse and download files graphically instead.
-
-Adjust focus, repeat until stars are tight pinpoints. The `--shutter` value is in microseconds — `200000` equals 0.2 seconds, matching the default `Exposure:0.2` in `eFinder.config`. `--awbgains 1,1` disables auto white balance, matching the app's behaviour.
-
-To iterate quickly without retyping, use a one-liner loop on the Pi:
-
-```bash
-while true; do
-  libcamera-still --width 960 --height 760 \
-    --shutter 200000 --gain 20 --awbgains 1,1 \
-    --nopreview -o /tmp/focus_test.jpg && \
-  echo "Image captured — adjust focus and press Enter for next, Ctrl-C to stop"
-  read
-done
-```
-
-### Method 2 — Live MJPEG Stream to Laptop
-
-For a real-time view while adjusting focus, stream video from the Pi:
-
-```bash
-libcamera-vid \
-  --timeout 0 \
-  --width 960 --height 760 \
-  --shutter 200000 \
-  --gain 20 \
-  --codec mjpeg \
-  --listen \
-  -o tcp://0.0.0.0:8080
-```
-
-Then on your laptop open the stream in VLC (**Media → Open Network Stream**):
-
-```
-tcp/h264://192.168.50.1:8080
-```
-
-Or with ffplay (macOS/Linux):
-
-```bash
-ffplay tcp://192.168.50.1:8080
-```
-
-**Windows** — VLC for Windows works identically. Download from https://www.videolan.org if not already installed. ffplay is available as part of **ffmpeg for Windows** (https://ffmpeg.org/download.html) if you prefer the command line.
-
-Press Ctrl-C on the Pi to stop streaming when done.
+TBD
 
 ### Focus Targets
 
@@ -349,6 +271,10 @@ When connected to the eFinder WiFi network, open Terminal (macOS/Linux) or Power
 
 ```bash
 ssh efinder@192.168.50.1
+```
+or
+```bash
+ssh efinder@efinder.local
 ```
 
 Windows users can also use **PuTTY** — enter IP `192.168.50.1`, port `22`.
@@ -409,15 +335,7 @@ This gives read/write access to `/home/efinder` — useful for copying config fi
 
 ## OTA Updates
 
-To update files on the Pi without SSH:
-
-1. Create a zip archive of the files to update, preserving their full paths from `/`  
-   e.g. `home/efinder/Solver/eFinder.py` inside the zip
-2. Name the file `efinderUpdate.zip`
-3. Copy it to `\\192.168.50.1\efindershare\uploads\` via Samba
-4. Reboot the Pi
-
-On next boot the update service runs before the main app, extracts the zip to `/`, and reboots again automatically. If the zip is malformed it is deleted and the Pi continues normally.
+TBD
 
 ---
 
