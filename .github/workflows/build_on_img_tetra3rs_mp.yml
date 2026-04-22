@@ -127,7 +127,7 @@ jobs:
           
           # --- Locale + timezone configuration ---
           
-          ROOT=/mnt/root
+          ROOT=/mnt/pi/root
           
           # Locale definition
           echo "en_US.UTF-8 UTF-8" | sudo tee $ROOT/etc/locale.gen
