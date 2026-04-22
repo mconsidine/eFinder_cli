@@ -124,10 +124,14 @@ jobs:
           sudo mkdir -p /mnt/pi/boot/firmware
           sudo mount ${LOOP}p2 /mnt/pi
           sudo mount ${LOOP}p1 /mnt/pi/boot/firmware
-          
+
+          ls -l /mnt
+          ls -l /mnt/root
+          ls -l /mnt/pi
+
           # --- Locale + timezone configuration ---
           
-          ROOT=/mnt/pi/root
+          ROOT=/mnt/pi/
           
           # Locale definition
           echo "en_US.UTF-8 UTF-8" | sudo tee $ROOT/etc/locale.gen
