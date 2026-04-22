@@ -124,6 +124,39 @@ jobs:
           sudo mkdir -p /mnt/pi/boot/firmware
           sudo mount ${LOOP}p2 /mnt/pi
           sudo mount ${LOOP}p1 /mnt/pi/boot/firmware
+          
+          # --- Locale + timezone configuration ---
+          
+          ROOT=/mnt/root
+          
+          # Locale definition
+          echo "en_US.UTF-8 UTF-8" | sudo tee $ROOT/etc/locale.gen
+          
+          sudo tee $ROOT/etc/default/locale > /dev/null <<EOF
+          LANG=en_US.UTF-8
+          LC_ALL=en_US.UTF-8
+          EOF
+          
+          ## Timezone
+          #echo "America/New_York" | sudo tee $ROOT/etc/timezone
+          #sudo ln -sf /usr/share/zoneinfo/America/New_York $ROOT/etc/localtime
+          # Timezone = UTC
+          echo "Etc/UTC" | sudo tee $ROOT/etc/timezone
+          sudo ln -sf /usr/share/zoneinfo/Etc/UTC $ROOT/etc/localtime
+          
+          # Prepare chroot
+          sudo mount --bind /dev $ROOT/dev
+          sudo mount --bind /proc $ROOT/proc
+          sudo mount --bind /sys $ROOT/sys
+          
+          # Generate locale INSIDE the image (this is the critical fix)
+          sudo chroot $ROOT locale-gen
+          sudo chroot $ROOT update-locale LANG=en_US.UTF-8
+          
+          # Cleanup
+          sudo umount $ROOT/dev
+          sudo umount $ROOT/proc
+          sudo umount $ROOT/sys
 
           # ------------------------------------------------------------------
           # Create efinder user by writing directly to user database files.
