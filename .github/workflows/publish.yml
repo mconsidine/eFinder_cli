@@ -2,7 +2,7 @@ name: Publish Image
 
 on:
   workflow_run:
-    workflows: ["build_on_img_tetra3rs_mp"]   # MUST match your build workflow name exactly
+    workflows: ["tetra3rs_mp Build on img tetra3rs_mp"]   # MUST match your build workflow name exactly
     types:
       - completed
 
