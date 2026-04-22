@@ -286,7 +286,7 @@ if [ ! -f "$DB_CACHE" ]; then
     echo "    star_max_magnitude=${DB_MAG}.0,"                             >> "$GEN_SCRIPT"
     echo "    patterns_per_lattice_field=50,"                              >> "$GEN_SCRIPT"
     echo "    epoch_proper_motion_year=2026,"                              >> "$GEN_SCRIPT"
-    echo "    verification_stars_per_fov=150,"                             >> "$GEN_SCRIPT"
+    echo "    verification_stars_per_fov=100,"                             >> "$GEN_SCRIPT"
     echo ")"                                                               >> "$GEN_SCRIPT"
     echo "db.save_to_file('${DB_CACHE}')"                                  >> "$GEN_SCRIPT"
     echo "print('Database saved: stars=%d patterns=%d' % (db.num_stars, db.num_patterns))" >> "$GEN_SCRIPT"
