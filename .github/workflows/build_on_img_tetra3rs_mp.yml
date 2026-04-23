@@ -154,8 +154,8 @@ jobs:
           ls -lha /mnt
           
           # Generate locale INSIDE the image (this is the critical fix)
-          sudo chroot $ROOT /mnt/usr/sbin/locale-gen
-          sudo chroot $ROOT /mnt/usr/sbin/update-locale LANG=en_US.UTF-8
+          sudo chroot $ROOT $ROOT/usr/sbin/locale-gen
+          sudo chroot $ROOT $ROOT/usr/sbin/update-locale LANG=en_US.UTF-8
           
           # Cleanup
           sudo umount $ROOT/dev
