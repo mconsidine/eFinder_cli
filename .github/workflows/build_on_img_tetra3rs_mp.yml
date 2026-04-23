@@ -125,7 +125,7 @@ jobs:
           sudo mount ${LOOP}p2 /mnt/pi
           sudo mount ${LOOP}p1 /mnt/pi/boot/firmware
 
-          ls -l /mnt/pi/etc
+          ls -l /mnt/pi/
 
           # --- Locale + timezone configuration ---
           
@@ -150,10 +150,12 @@ jobs:
           sudo mount --bind /dev $ROOT/dev
           sudo mount --bind /proc $ROOT/proc
           sudo mount --bind /sys $ROOT/sys
+
+          ls -lha /mnt
           
           # Generate locale INSIDE the image (this is the critical fix)
-          sudo chroot $ROOT $ROOT/usr/sbin/locale-gen
-          sudo chroot $ROOT $ROOT/usr/sbin/update-locale LANG=en_US.UTF-8
+          sudo chroot $ROOT /mnt/usr/sbin/locale-gen
+          sudo chroot $ROOT /mnt/usr/sbin/update-locale LANG=en_US.UTF-8
           
           # Cleanup
           sudo umount $ROOT/dev
