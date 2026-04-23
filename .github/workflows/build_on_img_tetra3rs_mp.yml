@@ -125,8 +125,11 @@ jobs:
           sudo mount ${LOOP}p2 /mnt/pi
           sudo mount ${LOOP}p1 /mnt/pi/boot/firmware
 
-          ls -l /mnt/pi/
-
+          echo "start _------------------"
+          ls -l /mnt/pi/usr
+          echo "__-------------+++--------"
+          ls -l /mnt/pi/usr/sbin
+          ech "end ------+------"
           # --- Locale + timezone configuration ---
           
           ROOT=/mnt/pi/
