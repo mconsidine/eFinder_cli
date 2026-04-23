@@ -125,9 +125,7 @@ jobs:
           sudo mount ${LOOP}p2 /mnt/pi
           sudo mount ${LOOP}p1 /mnt/pi/boot/firmware
 
-          ls -l /mnt
-          ls -l /mnt/pi
-          sudo find . | grep locale.gen
+          ls -l /mnt/pi/etc
 
           # --- Locale + timezone configuration ---
           
