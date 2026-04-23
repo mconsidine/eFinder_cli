@@ -155,8 +155,8 @@ jobs:
           sudo mount --bind /sys $ROOT/sys
           echo "heeeeeeeere"
           # Generate locale INSIDE the image (this is the critical fix)
-          sudo chroot $ROOT /mnt/pi/usr/sbin/locale-gen
-          sudo chroot $ROOT /mnt/pi/usr/sbin/update-locale LANG=en_US.UTF-8
+          sudo chroot $ROOT /usr/sbin/locale-gen
+          sudo chroot $ROOT /usr/sbin/update-locale LANG=en_US.UTF-8
           echo " now hereeeeee"
           # Cleanup
           sudo umount $ROOT/dev
