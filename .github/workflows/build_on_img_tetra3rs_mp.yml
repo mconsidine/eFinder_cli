@@ -1,8 +1,8 @@
 name: tetra3rs_mp Build eFinder RPi Image
 
 on:
-  push:
-    branches: [ tetra3rs_mp ]
+  #push:
+  #  branches: [ tetra3rs_mp ]
   workflow_dispatch:
     inputs:
       wifi_password:
