@@ -1,8 +1,9 @@
 name: tetra3rs_mp Build eFinder RPi Image
 
 on:
-  #push:
-  #  branches: [ tetra3rs_mp ]
+  push:
+    branches: [ tetra3rs_mp ]
+    
   workflow_dispatch:
     inputs:
       wifi_password:
@@ -125,11 +126,6 @@ jobs:
           sudo mount ${LOOP}p2 /mnt/pi
           sudo mount ${LOOP}p1 /mnt/pi/boot/firmware
 
-          echo "start _------------------"
-          ls -l /mnt/pi/usr
-          echo "__-------------+++--------"
-          ls -l /mnt/pi/usr/sbin
-          echo "end ------+------"
           # --- Locale + timezone configuration ---
           
           ROOT=/mnt/pi/
@@ -408,14 +404,14 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      #- name: Create Release
-      #  uses: softprops/action-gh-release@v2
-      #  with:
-      #    name: ${{ env.ARTIFACT_NAME }}
-      #    files: 2025-10-01-raspios-trixie-arm64-lite.img.xz
-      #    tag_name: "tetra3rs_mp_v1.0.0"
-      #  env:
-      #    GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          files: 2025-10-01-raspios-trixie-arm64-lite.img.xz
+          tag_name: "tetra3rs_mp_v1.0.0"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload build logs on failure
         if: failure()
