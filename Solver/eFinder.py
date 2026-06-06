@@ -67,12 +67,12 @@ class Camera:
     TUNING_FILE = "/usr/share/libcamera/ipa/rpi/vc4/imx477_scientific.json"
 
     def __init__(self):
-        if os.path.exists(self.TUNING_FILE):
-            self.picam2 = Picamera2(tuning_file=self.TUNING_FILE)
-        else:
-            print(f"Warning: tuning file not found at {self.TUNING_FILE}, "
-                  "using default")
-            self.picam2 = Picamera2()
+        tuning = self.TUNING_FILE
+        if not os.path.exists(tuning):
+            print(f"WARNING: IMX477 scientific tuning file not found at "
+                  f"{tuning} — falling back to default tuning")
+            tuning = ""
+        self.picam2 = Picamera2(tuning_file=tuning) if tuning else Picamera2()
         cfg = self.picam2.create_still_configuration(
             main={"size": (960, 760), "format": "YUV420"},
             sensor={"output_size": (2028, 1520)},
