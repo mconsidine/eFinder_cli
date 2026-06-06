@@ -1,133 +1,699 @@
-#!/bin/sh
+#!/bin/bash
+# =============================================================================
+# eFinder CLI Install Script for Raspberry Pi Zero 2W
+# - IMX477 camera (RPi HQ Camera or Arducam IMX477)
+# - NetworkManager-based WiFi AP (boots into AP mode by default)
+# - SSH enabled on both AP and tethered USB serial modes
+# - Clean venv with system-site-packages
+# =============================================================================
+set -eo pipefail
 
-echo "eFinder cli install"
-echo " "
-echo "*****************************************************************************"
-echo "Updating Pi OS & packages"
-echo "*****************************************************************************"
-sudo apt update
-sudo apt upgrade -y
-echo " "
-echo "*****************************************************************************"
-echo "Installing additional Debian and Python packages"
-echo "*****************************************************************************"
-sudo apt install -m -y python3-pip
-sudo apt install -y python3-serial
-sudo apt install -y python3-psutil
-sudo apt install -y python3-pil
-sudo apt install -y python3-pil.imagetk
-sudo apt install -y git
-sudo apt install -y python3-smbus
-sudo apt install -y python3-picamera2
-sudo apt install -y python3-scipy
+EFINDER_HOME=/home/efinder
+EFINDER_USER=efinder
+VENV="$EFINDER_HOME/venv-efinder"
+INSTALL_MARKER="$EFINDER_HOME/.efinder_installed"
 
-HOME=/home/efinder
-cd $HOME
-echo " "
+# =============================================================================
+# CONFIGURATION — edit these before running if needed
+# =============================================================================
 
-python -m venv /home/efinder/venv-efinder --system-site-packages
-venv-efinder/bin/python venv-efinder/bin/pip install adafruit-circuitpython-adxl34x
-venv-efinder/bin/python venv-efinder/bin/pip install gdown
+# Set to true if an ADXL343 accelerometer is wired to the I2C bus.
+# When false: python3-smbus is not installed, adafruit pip package is skipped,
+# and I2C is not enabled. The app handles absence gracefully at runtime.
+USE_ACCELEROMETER=true
 
-cd $HOME
-echo " "
-echo "*****************************************************************************"
-echo "Downloading eFinder_cli from AstroKeith GitHub"
-echo "*****************************************************************************"
-sudo -u efinder git clone https://github.com/AstroKeith/eFinder_cli.git
-echo " "
+# Set to true to run apt upgrade after apt update.
+# On a freshly burned image this adds 5-15 minutes and is rarely necessary.
+# The base Bookworm image is already recent enough for all dependencies.
+UPGRADE_PACKAGES=false
 
-cd $HOME
-echo " "
-echo "*****************************************************************************"
-echo "Unpacking eFinder_cli & configuring"
-echo "*****************************************************************************"
-echo "tmpfs /var/tmp tmpfs nodev,nosuid,size=10M 0 0" | sudo tee -a /etc/fstab > /dev/null
-mkdir /home/efinder/Solver
-mkdir /home/efinder/Solver/images
-mkdir /home/efinder/uploads
-sudo chmod a+rwx /home/efinder/uploads
+# =============================================================================
 
-cp /home/efinder/eFinder_cli/Solver/*.* /home/efinder/Solver
-echo "tmpfs /home/efinder/Solver/images tmpfs nodev,nosuid,size=10M 0 0" | sudo tee -a /etc/fstab > /dev/null
+# ---------------------------------------------------------------------------
+# Guard: must be run as the efinder user (with sudo), not as root directly.
+# File ownership inside $EFINDER_HOME will be wrong if run as root.
+# Supports both: sudo bash install.sh  AND  curl ... | sudo bash
+# ---------------------------------------------------------------------------
+RUNNING_AS="${SUDO_USER:-$(who am i 2>/dev/null | awk '{print $1}')}"
+RUNNING_AS="${RUNNING_AS:-$EFINDER_USER}"  # default to efinder in piped context
+if [ "$RUNNING_AS" != "$EFINDER_USER" ]; then
+    echo "ERROR: Run this script as the '$EFINDER_USER' user, e.g.:"
+    echo "       sudo bash install.sh   (while logged in as $EFINDER_USER)"
+    exit 1
+fi
 
-cd $HOME
-echo " "
-echo "*****************************************************************************"
-echo "Installing Samba file share support"
-echo "*****************************************************************************"
-sudo apt install -y samba samba-common-bin
-sudo tee -a /etc/samba/smb.conf > /dev/null <<EOT
+# ---------------------------------------------------------------------------
+# Guard: must be running on a Raspberry Pi Zero 2W
+# ---------------------------------------------------------------------------
+PI_MODEL=$(tr -d '\0' < /proc/device-tree/model 2>/dev/null || echo "unknown")
+if [[ "$PI_MODEL" != *"Zero 2"* ]]; then
+    echo "WARNING: This script is designed for Raspberry Pi Zero 2W."
+    echo "         Detected: $PI_MODEL"
+    if [ -t 0 ]; then
+        read -rp "Continue anyway? [y/N] " confirm
+        [[ "$confirm" =~ ^[Yy]$ ]] || exit 1
+    else
+        echo "  Non-interactive mode — continuing anyway."
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+# Guard: skip expensive steps if already completed (re-run safety)
+# ---------------------------------------------------------------------------
+if [ -f "$INSTALL_MARKER" ]; then
+    echo "NOTE: $INSTALL_MARKER exists — this device has been installed before."
+    if [ -t 0 ]; then
+        read -rp "Re-run full install anyway? [y/N] " rerun
+        [[ "$rerun" =~ ^[Yy]$ ]] || exit 0
+    else
+        echo "  Non-interactive mode — re-running install."
+    fi
+fi
+
+echo "============================================================================="
+echo " eFinder CLI Installer"
+echo " Device : $PI_MODEL"
+echo "============================================================================="
+
+# ---------------------------------------------------------------------------
+# Check internet connectivity — required for apt, tetra3 clone, and bundle
+# re-download. On re-runs without internet, network steps are skipped.
+# ---------------------------------------------------------------------------
+if curl -s --max-time 5 https://github.com > /dev/null 2>&1; then
+    HAVE_INTERNET=true
+    echo "Internet connectivity confirmed."
+else
+    HAVE_INTERNET=false
+    echo "WARNING: No internet access detected."
+    echo "  Package installation and repo update steps will be skipped."
+    echo "  This is safe on a re-run if packages were already installed."
+fi
+
+# ---------------------------------------------------------------------------
+# 1. System update & package installation
+# ---------------------------------------------------------------------------
+echo ""
+if [ "$HAVE_INTERNET" = true ]; then
+    echo "[1/9] Updating package index..."
+    sudo apt update
+
+    if [ "$UPGRADE_PACKAGES" = true ]; then
+        echo "  Upgrading all packages (this takes 5-15 minutes)..."
+        sudo apt upgrade -y
+    else
+        echo "  Skipping full upgrade (set UPGRADE_PACKAGES=true to enable)."
+    fi
+
+    echo ""
+    echo "[2/9] Installing required packages..."
+    sudo apt install -y \
+        python3-pip \
+        python3-pil \
+        python3-pil.imagetk \
+        python3-picamera2 \
+        python3-scipy \
+        git \
+        rpicam-apps \
+        netcat-openbsd \
+        samba \
+        samba-common-bin \
+        apache2 \
+        php8.2 \
+        libapache2-mod-php8.2
+
+    if [ "$USE_ACCELEROMETER" = true ]; then
+        echo "  Installing accelerometer support packages..."
+        sudo apt install -y python3-smbus
+    fi
+else
+    echo "[1/9] Skipping package update — no internet."
+    echo "[2/9] Skipping package install — no internet."
+fi
+
+# ---------------------------------------------------------------------------
+# 2. Python virtual environment
+# ---------------------------------------------------------------------------
+echo ""
+echo "[3/9] Setting up Python virtual environment..."
+# Recreate if missing OR if pip binary is absent (broken/partial venv from reset)
+if [ ! -f "$VENV/bin/pip" ]; then
+    echo "  Creating venv..."
+    sudo rm -rf "$VENV"   # remove any partial remnant
+    sudo -u "$EFINDER_USER" python3 -m venv "$VENV" --system-site-packages
+else
+    echo "  Venv already present and functional."
+fi
+
+if [ "$HAVE_INTERNET" = true ]; then
+    if [ "$USE_ACCELEROMETER" = true ]; then
+        echo "  Installing accelerometer Python package..."
+        "$VENV/bin/pip" install adafruit-circuitpython-adxl34x
+    fi
+else
+    echo "  Skipping pip installs — no internet."
+fi
+
+# ---------------------------------------------------------------------------
+# 3. Verify eFinder_cli bundle is present
+#    On first run the user downloads this via curl/unzip per the README.
+#    On re-runs the directory already exists. If missing, re-download it.
+# ---------------------------------------------------------------------------
+echo ""
+echo "[4/9] Checking eFinder_cli bundle..."
+REPO_URL="https://github.com/mconsidine/eFinder_cli/archive/refs/heads/tinySS.zip"
+REPO_DIR="$EFINDER_HOME/eFinder_cli"
+if [ ! -d "$REPO_DIR" ]; then
+    if [ "$HAVE_INTERNET" = true ]; then
+        echo "  Bundle not found — downloading from GitHub..."
+        curl -L "$REPO_URL" -o /tmp/efinder.zip
+        unzip /tmp/efinder.zip -d /tmp/
+        mv /tmp/eFinder_cli-tinySS "$REPO_DIR"
+        rm /tmp/efinder.zip
+        sudo chown -R "$EFINDER_USER:$EFINDER_USER" "$REPO_DIR"
+        echo "  Bundle downloaded and unpacked."
+    else
+        echo "ERROR: eFinder_cli bundle not found and no internet access."
+        echo "       Download and unpack the bundle first — see README Part 3.1."
+        exit 1
+    fi
+else
+    echo "  Bundle already present at $REPO_DIR"
+fi
+
+# ---------------------------------------------------------------------------
+# 4. Directory structure and file deployment
+# ---------------------------------------------------------------------------
+echo ""
+echo "[5/9] Setting up directory structure..."
+mkdir -p "$EFINDER_HOME/Solver/images"
+mkdir -p "$EFINDER_HOME/uploads"
+sudo chmod a+rwx "$EFINDER_HOME/uploads"
+sudo chmod a+rwx "$EFINDER_HOME/Solver/images"
+sudo chmod a+rwx "$EFINDER_HOME"
+
+# Copy support files from the repo bundle into the working Solver directory.
+# Excludes the www/ subdirectory (web files deployed separately below).
+# eFinder.py is deployed later from the script's own directory.
+find "$REPO_DIR/Solver" -maxdepth 1 -type f | while read -r f; do
+    cp "$f" "$EFINDER_HOME/Solver/"
+done
+sudo chown -R "$EFINDER_USER:$EFINDER_USER" "$EFINDER_HOME/Solver"
+sudo chmod 755 "$EFINDER_HOME/Solver/eFinder.py"
+
+# RAM-backed tmpfs mounts for image scratch space
+# Add only if not already present
+grep -q "/var/tmp" /etc/fstab || \
+    echo "tmpfs /var/tmp tmpfs nodev,nosuid,size=10M 0 0" | sudo tee -a /etc/fstab > /dev/null
+
+grep -q "$EFINDER_HOME/Solver/images" /etc/fstab || \
+    echo "tmpfs $EFINDER_HOME/Solver/images tmpfs nodev,nosuid,size=10M 0 0" | \
+    sudo tee -a /etc/fstab > /dev/null
+
+sudo systemctl daemon-reload   # pick up fstab changes before mount -a
+sudo mount -a
+
+# ---------------------------------------------------------------------------
+# 5. Install Tetra3 star-pattern matching library
+# ---------------------------------------------------------------------------
+echo ""
+echo "[6/9] Installing Tetra3..."
+if [ "$HAVE_INTERNET" = true ]; then
+    # Shallow clone — only latest commit, no history. Saves 30-60 seconds.
+    if [ ! -d "$EFINDER_HOME/tetra3_source" ]; then
+        sudo -u "$EFINDER_USER" git clone --depth 1 \
+            https://github.com/esa/tetra3.git \
+            "$EFINDER_HOME/tetra3_source"
+    fi
+    cd "$EFINDER_HOME/tetra3_source"
+    # --no-build-isolation skips downloading build dependencies (setuptools etc.)
+    # since they are already available in the system Python environment.
+    if ! "$VENV/bin/python3" -c "
+import tetra3, os
+path = tetra3.__file__
+assert 'venv-efinder' in path, 'tetra3 not in venv'
+" 2>/dev/null; then
+        echo "  Installing tetra3 into venv..."
+        "$VENV/bin/pip" install --no-build-isolation .
+    else
+        echo "  Tetra3 already correctly installed in venv — skipping."
+    fi
+    # Fix ownership — pip running under sudo may leave site-packages
+    # files owned by root, causing permission errors on cleanup.
+    sudo chown -R "$EFINDER_USER:$EFINDER_USER" "$VENV"
+    echo "  Tetra3 installed into venv from source."
+else
+    if ! "$VENV/bin/python3" -c "import tetra3" 2>/dev/null; then
+        echo "  WARNING: Tetra3 not installed and no internet available."
+        echo "           Re-run install.sh with internet access to complete this step."
+    else
+        echo "  Tetra3 already installed — skipping (no internet)."
+    fi
+fi
+
+# Install the Tetra3 database from the repo bundle.
+# Must cd away from tetra3_source first — if cwd is the source tree Python
+# imports tetra3 from there instead of the venv, giving the wrong data path.
+cd "$EFINDER_HOME"
+TETRA3_DATA=$("$VENV/bin/python3" -c \
+    "import tetra3, os; print(os.path.join(os.path.dirname(tetra3.__file__), 'data'))" \
+    2>/dev/null) || TETRA3_DATA=""
+
+DB_SOURCE="$REPO_DIR/Solver/databases"
+
+if [ -z "$TETRA3_DATA" ]; then
+    echo "  WARNING: Could not determine tetra3 data path — is tetra3 installed?"
+    echo "           Re-run install.sh with internet access to install Tetra3 first."
+elif [ ! -d "$DB_SOURCE" ] || [ -z "$(ls "$DB_SOURCE"/*.npz 2>/dev/null)" ]; then
+    echo "  WARNING: No database files found in $DB_SOURCE"
+    echo "           Add t3_fov14_mag8.npz to Solver/databases/ in the repo."
+    echo "           See README 'Generating a Tetra3 Database' for instructions."
+else
+    echo "  Installing database(s) from repo bundle to: $TETRA3_DATA"
+    sudo mkdir -p "$TETRA3_DATA"
+    sudo cp "$DB_SOURCE"/*.npz "$TETRA3_DATA/"
+    sudo chmod 644 "$TETRA3_DATA"/*.npz
+    # Verify the copy succeeded and the file is readable
+    for f in "$DB_SOURCE"/*.npz; do
+        fname=$(basename "$f")
+        if [ -r "$TETRA3_DATA/$fname" ]; then
+            echo "  OK: $fname ($(du -h "$TETRA3_DATA/$fname" | cut -f1))"
+        else
+            echo "  ERROR: $fname was not copied or is not readable at $TETRA3_DATA/$fname"
+            echo "         Manual fix: sudo cp $f $TETRA3_DATA/"
+        fi
+    done
+fi
+
+# ---------------------------------------------------------------------------
+# 6. Samba share
+# ---------------------------------------------------------------------------
+echo ""
+echo "[7/9] Configuring Samba file share..."
+if ! grep -q "\[efindershare\]" /etc/samba/smb.conf; then
+    sudo tee -a /etc/samba/smb.conf > /dev/null <<'EOF'
 [efindershare]
 path = /home/efinder
-writeable=Yes
-create mask=0777
-directory mask=0777
-public=no
-EOT
-username="efinder"
-pass="efinder"
-(echo $pass; sleep 1; echo $pass) | sudo smbpasswd -a -s $username
-sudo systemctl restart smbd
+writeable = Yes
+create mask = 0777
+directory mask = 0777
+public = no
+EOF
+fi
 
-cd $HOME
-echo " "
-echo "*****************************************************************************"
-echo "installing Tetra3 and its databases"
-echo "*****************************************************************************"
-sudo -u efinder git clone https://github.com/esa/tetra3.git
-cd tetra3
-/home/efinder/venv-efinder/bin/pip install .
-cd $HOME
-sudo venv-efinder/bin/gdown  --output /home/efinder/venv-efinder/lib/python3.11/site-packages/tetra3/data --folder https://drive.google.com/drive/folders/1uxbdttpg0Dpp8OuYUDY9arYoeglfZzcX
+# Set Samba password non-interactively
+SAMBA_PASS="efinder"
+(echo "$SAMBA_PASS"; echo "$SAMBA_PASS") | sudo smbpasswd -s -a "$EFINDER_USER"
+sudo systemctl enable --now smbd
 
-echo " "
-echo "*****************************************************************************"
-echo "Setting up web page server"
-echo "*****************************************************************************"
-sudo apt-get install -y apache2
-sudo apt-get install -y php8.2
-sudo chmod a+rwx /home/efinder
-sudo chmod a+rwx /home/efinder/Solver/images
-sudo cp eFinder_cli/Solver/index.php /var/www/html
-sudo cp /home/efinder/eFinder_cli/Solver/upload.php /var/www/html
-sudo cp /home/efinder/eFinder_cli/Solver/updater.html /var/www/html
-sudo cp /home/efinder/eFinder_cli/Solver/user.ini /etc/php/8.2/apache2/conf.d
-sudo cp /home/efinder/eFinder_cli/Solver/user.ini /etc/php/8.2/cli/conf.d
-sudo mv /var/www/html/index.html /var/www/html/apacheindex.html
+# ---------------------------------------------------------------------------
+# 7. Apache / PHP web server
+# ---------------------------------------------------------------------------
+echo ""
+echo "[8/9] Configuring Apache/PHP web server..."
+
+# Deploy PHP application files from repo bundle
+sudo cp "$REPO_DIR/Solver/www/index.php"    /var/www/html/
+sudo cp "$REPO_DIR/Solver/www/stream.php"   /var/www/html/
+sudo cp "$REPO_DIR/Solver/www/upload.php"   /var/www/html/
+sudo cp "$REPO_DIR/Solver/www/updater.html" /var/www/html/
+sudo cp "$REPO_DIR/Solver/www/user.ini"     /etc/php/8.2/apache2/conf.d/
+sudo cp "$REPO_DIR/Solver/www/user.ini"     /etc/php/8.2/cli/conf.d/
+sudo cp "$REPO_DIR/Solver/www/log.php"      /var/www/html/
+
+# Copy README to web root so it is browseable in AP mode at http://192.168.50.1/README.md
+sudo cp "$REPO_DIR/README.md" /var/www/html/README.md
+
+# Allow Apache (www-data) to read the systemd journal so log.php works
+sudo usermod -a -G systemd-journal www-data
+
+# Install Apache config to extend timeout for MJPEG stream.
+# Without this Apache kills the stream.php connection after 60 seconds.
+sudo cp "$REPO_DIR/Solver/www/efinder.conf" \
+    /etc/apache2/conf-available/efinder.conf
+sudo a2enconf efinder
+
+# Move default Apache index out of the way (only once)
+[ -f /var/www/html/index.html ] && sudo mv /var/www/html/index.html /var/www/html/apacheindex.html
+
 sudo chmod -R 755 /var/www/html
+sudo systemctl enable --now apache2
 
-cd $HOME
-echo " "
-echo "*****************************************************************************"
-echo "Final eFinder_cli configuration setting"
-echo "*****************************************************************************"
+# ---------------------------------------------------------------------------
+# 8. Boot firmware configuration (config.txt)
+#    - IMX477 / Arducam camera
+#    - USB gadget serial (for tethered SSH)
+#    - Disable KMS overlay that conflicts with camera stack
+# ---------------------------------------------------------------------------
+echo ""
+echo "[9/9] Writing /boot/firmware/config.txt..."
 
-sudo tee -a /boot/firmware/config.txt > /dev/null <<EOT
+# Build a new config.txt: preserve existing content, but:
+#   - Comment out vc4-kms-v3d and max_framebuffers (conflict with camera)
+#   - Remove any previous efinder-specific overlays before re-adding
+BOOT_CONFIG=/boot/firmware/config.txt
+BACKUP=/boot/firmware/config.txt.bak
+
+sudo cp "$BOOT_CONFIG" "$BACKUP"
+
+# Comment out lines that conflict with libcamera/picamera2
+sudo sed -i \
+    -e '/^\s*dtoverlay=vc4-kms-v3d/s/^/#/' \
+    -e '/^\s*max_framebuffers=/s/^/#/' \
+    "$BOOT_CONFIG"
+
+# Remove any previous eFinder-managed lines so re-runs stay idempotent
+sudo sed -i \
+    -e '/^\s*dtoverlay=dwc2/d' \
+    -e '/^\s*enable_uart/d' \
+    -e '/^\s*dtoverlay=arducam/d' \
+    -e '/^\s*dtoverlay=imx477/d' \
+    -e '/^\s*camera_auto_detect/d' \
+    -e '/^# --- eFinder additions/d' \
+    -e '/^# IMX477 camera/d' \
+    -e '/^# Arducam IMX477/d' \
+    -e '/^# USB gadget serial/d' \
+    "$BOOT_CONFIG"
+
+# Append eFinder additions cleanly
+sudo tee -a "$BOOT_CONFIG" > /dev/null <<'EOF'
+
+# --- eFinder additions ---
+# IMX477 camera (RPi HQ Camera or Arducam IMX477 — stock Pi OS overlay)
+camera_auto_detect=0
+dtoverlay=imx477
+
+# USB gadget serial — enables /dev/ttyGS0 for tethered console
 dtoverlay=dwc2,dr_mode=peripheral
 enable_uart=1
-EOT
+EOF
 
-sudo python /home/efinder/Solver/cmdlineUpdater.py
+echo "config.txt updated."
 
-sudo chmod a+rwx eFinder_cli/Solver/my_cron
-sudo cp /home/efinder/eFinder_cli/Solver/my_cron /etc/cron.d
+# ---------------------------------------------------------------------------
+# 8b. cmdline.txt — add USB gadget serial module load (idempotent)
+# ---------------------------------------------------------------------------
+CMDLINE=/boot/firmware/cmdline.txt
+if ! grep -q "modules-load=dwc2,g_serial" "$CMDLINE"; then
+    sudo sed -i 's/rootwait/rootwait modules-load=dwc2,g_serial/' "$CMDLINE"
+    echo "cmdline.txt updated."
+else
+    echo "cmdline.txt already has USB serial module — no change."
+fi
 
-echo 'vm.swappiness = 0' | sudo tee -a /etc/sysctl.conf > /dev/null
-sudo raspi-config nonint do_boot_behaviour B2
+# ---------------------------------------------------------------------------
+# 9. NetworkManager WiFi Access Point
+#    - Boots into AP mode automatically
+#    - SSID: efinder + last 4 hex digits of MAC
+#    - Password: 12345678
+#    - Interface: wlan0
+#    - The AP connection is set to autoconnect; "preconfigured" (client mode)
+#      is set to NOT autoconnect so AP wins at boot.
+# ---------------------------------------------------------------------------
+echo ""
+echo "[AP] Configuring NetworkManager WiFi hotspot..."
+
+# Derive SSID from last 4 hex digits of wlan0 MAC
+MAC=$(cat /sys/class/net/wlan0/address 2>/dev/null || ip link show wlan0 | awk '/ether/{print $2}')
+LAST4=$(echo "$MAC" | tr -d ':' | tail -c 5)
+SSID="efinder${LAST4}"
+WIFI_PASS="12345678"
+
+echo "  SSID     : $SSID"
+echo "  Password : $WIFI_PASS"
+
+# Save to default_hotspot.txt so eFinder software can read it
+sudo -u "$EFINDER_USER" tee "$EFINDER_HOME/Solver/default_hotspot.txt" > /dev/null <<EOF
+ssid:${SSID}
+password:${WIFI_PASS}
+EOF
+
+# Remove any previous eFinder AP connection profile
+nmcli connection delete "efinder-ap" 2>/dev/null || true
+
+# Create a persistent AP connection profile
+sudo nmcli connection add \
+    type wifi \
+    ifname wlan0 \
+    con-name "efinder-ap" \
+    autoconnect yes \
+    ssid "$SSID" \
+    -- \
+    wifi-sec.key-mgmt wpa-psk \
+    wifi-sec.psk "$WIFI_PASS" \
+    wifi.mode ap \
+    wifi.band bg \
+    wifi.channel 6 \
+    ipv4.method shared \
+    ipv4.addresses "192.168.50.1/24" \
+    ipv6.method disabled \
+    connection.autoconnect-priority 100
+
+echo ""
+echo "  AP profile 'efinder-ap' created."
+echo "  Connect to SSID '$SSID' then SSH to 192.168.50.1"
+
+# ---------------------------------------------------------------------------
+# 10. USB gadget / tethered serial SSH
+#     - g_serial creates /dev/ttyGS0; getty on it lets you log in over USB
+#     - For IP-over-USB (RNDIS/ECM) the user can swap g_serial for g_ether
+#       but g_serial + USB→serial adapter + screen/minicom is simpler on Pi0
+# ---------------------------------------------------------------------------
+echo ""
+echo "[USB] Enabling getty on USB serial gadget interface..."
+
+sudo systemctl enable getty@ttyGS0.service 2>/dev/null || \
+    sudo systemctl enable serial-getty@ttyGS0.service 2>/dev/null || \
+    echo "  Note: USB serial getty will activate after reboot."
+
+# ---------------------------------------------------------------------------
+# 11. SSH daemon — ensure enabled with password authentication
+# ---------------------------------------------------------------------------
 sudo raspi-config nonint do_ssh 0
-sudo raspi-config nonint do_i2c 0
-sudo raspi-config nonint do_serial_cons 1
 
-sudo python /home/efinder/Solver/configUpdater.py
-sudo cp newconfig.txt /boot/firmware/config.txt
+# raspi-config do_ssh rewrites sshd_config using its own template which
+# sets PasswordAuthentication no on recent Bookworm images. Explicitly
+# set it back to yes so SSH password login works after install.
+sudo sed -i \
+    -e 's/^#*PasswordAuthentication.*/PasswordAuthentication yes/' \
+    -e 's/^#*ChallengeResponseAuthentication.*/ChallengeResponseAuthentication yes/' \
+    /etc/ssh/sshd_config
 
-cd $HOME
-echo " "
-echo "*****************************************************************************"
-echo "Setting up wifi"
-echo "*****************************************************************************"
-sudo python /home/efinder/Solver/setssid.py
+sudo systemctl enable --now ssh
+sudo systemctl restart ssh
+echo "  SSH enabled with password authentication."
 
-sudo reboot now
+# ---------------------------------------------------------------------------
+# 12. Interface / peripheral setup via raspi-config
+# ---------------------------------------------------------------------------
+sudo raspi-config nonint do_serial_cons 1  # disable serial console (keep port for GPS/etc)
 
+if [ "$USE_ACCELEROMETER" = true ]; then
+    sudo raspi-config nonint do_i2c 0      # enable I2C for ADXL343 accelerometer
+    echo "  I2C enabled for accelerometer."
+else
+    echo "  Accelerometer disabled — skipping I2C setup."
+fi
+
+# Reduce swap activity (images are in RAM; avoid wearing SD card)
+grep -q "vm.swappiness" /etc/sysctl.conf || \
+    echo 'vm.swappiness = 0' | sudo tee -a /etc/sysctl.conf > /dev/null
+
+# Set CPU governor to performance mode — keeps all 4 cores at full clock.
+# The Pi Zero 2W defaults to ondemand which throttles under light load,
+# hurting centroid detection and plate solving latency.
+# Implemented as a oneshot systemd service so it survives reboots cleanly.
+sudo tee /etc/systemd/system/cpu-performance.service > /dev/null <<'EOF'
+[Unit]
+Description=Set CPU governor to performance mode
+After=sysinit.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'echo performance | tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor'
+StandardOutput=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+sudo systemctl daemon-reload
+sudo systemctl enable --now cpu-performance.service
+echo "  CPU governor set to performance mode."
+
+# Allow the efinder app to set the system clock (needed for SkySafari time sync).
+# Scoped to 'date' only — no broader sudo access granted.
+SUDOERS_FILE=/etc/sudoers.d/efinder-date
+if [ ! -f "$SUDOERS_FILE" ]; then
+    echo "$EFINDER_USER ALL=(ALL) NOPASSWD: /bin/date, /usr/bin/nmcli" | \
+        sudo tee "$SUDOERS_FILE" > /dev/null
+    sudo chmod 440 "$SUDOERS_FILE"
+    echo "  Sudoers rule written: efinder may run /bin/date and /usr/bin/nmcli without password."
+fi
+
+# ---------------------------------------------------------------------------
+# Helper scripts
+# station.sh — switch to home network (station mode)
+# ap.sh      — switch back to AP mode (with reboot)
+# ---------------------------------------------------------------------------
+sudo tee "$EFINDER_HOME/station.sh" > /dev/null <<'EOF'
+#!/bin/bash
+echo "Switching to station (home network) mode..."
+sudo nmcli connection modify preconfigured autoconnect yes
+sudo nmcli connection up preconfigured
+echo ""
+echo "Done. Check your router for the Pi's IP address, or try:"
+echo "  ssh efinder@efinder.local"
+echo ""
+echo "To return to AP mode after you are done:"
+echo "  bash ~/ap.sh"
+EOF
+sudo chown "$EFINDER_USER:$EFINDER_USER" "$EFINDER_HOME/station.sh"
+sudo chmod 755 "$EFINDER_HOME/station.sh"
+echo "  station.sh installed at $EFINDER_HOME/station.sh"
+
+# Deploy ap.sh from the repo bundle
+if [ -f "$REPO_DIR/ap.sh" ]; then
+    sudo install -m 755 -o "$EFINDER_USER" -g "$EFINDER_USER" \
+        "$REPO_DIR/ap.sh" "$EFINDER_HOME/ap.sh"
+    echo "  ap.sh installed at $EFINDER_HOME/ap.sh"
+else
+    echo "  WARNING: ap.sh not found in repo bundle — skipping."
+fi
+
+# Deploy reset.sh from the repo bundle
+if [ -f "$REPO_DIR/reset.sh" ]; then
+    sudo install -m 755 -o "$EFINDER_USER" -g "$EFINDER_USER" \
+        "$REPO_DIR/reset.sh" "$EFINDER_HOME/reset.sh"
+    echo "  reset.sh installed at $EFINDER_HOME/reset.sh"
+else
+    echo "  WARNING: reset.sh not found in repo bundle — skipping."
+fi
+
+# ---------------------------------------------------------------------------
+# 13. systemd service: efinder-update (OTA zip updater, runs before main app)
+#     Replaces the zip-check logic that was in loader.py.
+#     Runs once at boot as root, applies any zip in /home/efinder/uploads/,
+#     then exits so efinder.service can start.
+# ---------------------------------------------------------------------------
+echo ""
+echo "[13] Installing efinder-update systemd service..."
+sudo tee /etc/systemd/system/efinder-update.service > /dev/null <<'EOF'
+[Unit]
+Description=eFinder OTA update checker
+# Must complete before the main app starts
+Before=efinder.service
+After=local-fs.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=root
+WorkingDirectory=/home/efinder
+ExecStart=/bin/bash /home/efinder/Solver/apply_update.sh
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Write the update helper script
+sudo tee "$EFINDER_HOME/Solver/apply_update.sh" > /dev/null <<'SHEOF'
+#!/bin/bash
+ZIPFILE="/home/efinder/uploads/efinderUpdate.zip"
+if [ ! -f "$ZIPFILE" ]; then
+    echo "No update zip found — skipping."
+    exit 0
+fi
+echo "Update zip found — applying..."
+if unzip -o "$ZIPFILE" -d /; then
+    find / -name "*.py" -newer "$ZIPFILE" -exec chmod a+rwx {} \; 2>/dev/null || true
+    rm -f "$ZIPFILE"
+    echo "Update applied — rebooting."
+    systemctl reboot
+else
+    echo "Update failed — removing zip and continuing."
+    rm -f "$ZIPFILE"
+fi
+SHEOF
+sudo chmod 755 "$EFINDER_HOME/Solver/apply_update.sh"
+sudo chown root:root "$EFINDER_HOME/Solver/apply_update.sh"
+sudo systemctl enable efinder-update.service
+
+# ---------------------------------------------------------------------------
+# 14. systemd service: efinder (main application)
+#     Starts after OTA update check; restarts on failure with a cap to avoid
+#     reboot loops if the camera is genuinely absent or misconfigured.
+# ---------------------------------------------------------------------------
+echo ""
+echo "[14] Installing efinder systemd service..."
+sudo tee /etc/systemd/system/efinder.service > /dev/null <<'EOF'
+[Unit]
+Description=eFinder telescope plate solver
+After=efinder-update.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=efinder
+WorkingDirectory=/home/efinder/Solver
+Environment=PATH=/home/efinder/venv-efinder/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/home/efinder/venv-efinder/bin/python /home/efinder/Solver/eFinder.py
+Restart=on-failure
+RestartSec=15
+# Cap retries — if the camera is genuinely absent, don't spin forever
+StartLimitIntervalSec=120
+StartLimitBurst=4
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable efinder.service
+
+# Remove the old cron-based autostart if it exists
+sudo rm -f /etc/cron.d/efinder
+echo "  efinder.service installed and enabled."
+echo "  View logs with: journalctl -u efinder -f"
+
+# ---------------------------------------------------------------------------
+# Done
+# ---------------------------------------------------------------------------
+echo ""
+echo "============================================================================="
+echo " Installation complete."
+echo ""
+echo " On next boot the eFinder starts automatically."
+echo ""
+echo "   WiFi AP  : SSID='$SSID'  Password='$WIFI_PASS'"
+echo "   SSH (AP) : ssh efinder@192.168.50.1"
+echo "   USB      : serial console on ttyGS0 (CoolTerm / screen / minicom)"
+echo "   SkySafari: connect to $SSID → TCP port 4060 (LX200)"
+echo ""
+echo " Camera    : IMX477 via imx477 overlay (HQ Camera or Arducam IMX477)"
+echo " Samba     : \\\\<ip>\\efindershare  (user: efinder / pass: efinder)"
+echo " Logs      : journalctl -u efinder -f"
+echo "============================================================================="
+echo ""
+
+# Write completion marker — prevents accidental re-runs of expensive steps
+date > "$INSTALL_MARKER"
+
+# Disable client-mode WiFi autoconnect now that all downloads are complete.
+# Doing this earlier risks dropping internet before packages finish installing.
+echo "Disabling autoconnect on 'preconfigured' WiFi client profile..."
+nmcli connection modify "preconfigured" autoconnect no 2>/dev/null || true
+
+if [ -t 0 ]; then
+    read -rp "Reboot now? [y/N] " ans
+    if [[ "$ans" =~ ^[Yy]$ ]]; then
+        sudo reboot now
+    fi
+else
+    echo "Non-interactive mode — rebooting in 5 seconds..."
+    sleep 5
+    sudo reboot now
+fi
