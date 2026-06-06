@@ -62,11 +62,27 @@ def save_param():
 # Camera  (IMX477 via picamera2, YUV420, Y-channel only)
 # ---------------------------------------------------------------------------
 class Camera:
+    # IMX477 scientific tuning profile — disables ISP noise reduction,
+    # sharpening, AWB and colour correction.  Change 'vc4' to 'pisp' on Pi 5.
+    TUNING_FILE = "/usr/share/libcamera/ipa/rpi/vc4/imx477_scientific.json"
+
     def __init__(self):
-        self.picam2 = Picamera2()
+        tuning = self.TUNING_FILE
+        if not os.path.exists(tuning):
+            print(f"WARNING: IMX477 scientific tuning file not found at "
+                  f"{tuning} — falling back to default tuning")
+            tuning = ""
+        self.picam2 = Picamera2(tuning_file=tuning) if tuning else Picamera2()
         cfg = self.picam2.create_still_configuration(
             main={"size": (960, 760), "format": "YUV420"},
             sensor={"output_size": (2028, 1520)},
+            controls={
+                "AeEnable":           False,
+                "AwbEnable":          False,
+                "NoiseReductionMode": 0,
+                "Sharpness":          0.0,
+                "Saturation":         0.0,
+            },
             buffer_count=2,
         )
         self.picam2.configure(cfg)
@@ -76,10 +92,13 @@ class Camera:
         gn  = int(float(gain))
         self.picam2.stop()
         self.picam2.set_controls({
-            "AeEnable":     False,
-            "AwbEnable":    False,
-            "ExposureTime": exp,
-            "AnalogueGain": gn,
+            "AeEnable":           False,
+            "AwbEnable":          False,
+            "NoiseReductionMode": 0,
+            "Sharpness":          0.0,
+            "Saturation":         0.0,
+            "ExposureTime":       exp,
+            "AnalogueGain":       gn,
         })
         self.picam2.start()
 
